@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ./api-gateway/Dockerfile
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      - auth-service
+      - super-admin-service
+      - tenant-service
+      - user-service
+      - email-service
+      - manager-service
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./auth-service/Dockerfile
+    ports:
+      - "3002:3002"
+    env_file: .env
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  super-admin-service:
+    build:
+      context: .
+      dockerfile: ./super-admin-service/Dockerfile
+    ports:
+      - "3001:3001"
+    env_file: .env
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  tenant-service:
+    build:
+      context: .
+      dockerfile: ./tenant-service/Dockerfile
+    ports:
+      - "3003:3003"
+    env_file: .env
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: .
+      dockerfile: ./user-service/Dockerfile
+    ports:
+      - "3004:3004"
+    env_file: .env
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  email-service:
+    build:
+      context: .
+      dockerfile: ./email-service/Dockerfile
+    ports:
+      - "3005:3005"
+    env_file: .env
+    restart: unless-stopped
+
+  manager-service:
+    build:
+      context: .
+      dockerfile: ./manager-service/Dockerfile
+    ports:
+      - "3006:3006"
+    env_file: .env
+    depends_on:
+      - mongo
+    volumes:
+      - manager-uploads:/usr/src/app/uploads
+    restart: unless-stopped
+
+  viewer-service:
+    build:
+      context: .
+      dockerfile: ./viewer-service/Dockerfile
+    ports:
+      - "3007:3007"
+    env_file: .env
+    depends_on:
+      - mongo
+    volumes:
+      - manager-uploads:/usr/src/app/uploads
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  manager-uploads:

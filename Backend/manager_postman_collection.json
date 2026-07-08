@@ -1,0 +1,618 @@
+{
+  "info": {
+    "_postman_id": "2bf5fa92-5b91-4cf1-8a9d-b8d23450917e",
+    "name": "DMS Manager Service API",
+    "description": "Postman collection covering all endpoints in the DMS Manager Service microservice, routed through the API Gateway on port 3000.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/dashboard",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "dashboard"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Folders",
+      "item": [
+        {
+          "name": "Create Folder (with optional files)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "name", "value": "Financial Reports 2026", "type": "text" },
+                { "key": "description", "value": "Annual accounting sheets", "type": "text" },
+                { "key": "parentFolder", "value": "", "description": "Optional parent folder ID", "type": "text" },
+                { "key": "folderColor", "value": "#4A90E2", "type": "text" },
+                { "key": "folderIcon", "value": "folder", "type": "text" },
+                { "key": "files", "description": "Select files to upload directly inside the folder", "type": "file", "src": [] }
+              ]
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Folder Tree Hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/tree",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "tree"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Folder Details & Child Items",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/{{folderId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "{{folderId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Folder Details",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Financial Reports 2026 - Updated\",\n  \"description\": \"Updated annual reporting description\",\n  \"folderColor\": \"#FF5733\",\n  \"folderIcon\": \"archive\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/{{folderId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "{{folderId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Soft Delete Folder",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/{{folderId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "{{folderId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Move Folder",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetFolderId\": \"64b22c7a3d2459012f10b2f5\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/{{folderId}}/move",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "{{folderId}}", "move"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Folder as ZIP",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/folders/{{folderId}}/zip",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "folders", "{{folderId}}", "zip"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "Upload Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "folderId", "value": "64b22c7a3d2459012f10b2f5", "description": "Optional folder ID", "type": "text" },
+                { "key": "name", "value": "Q4 Balance Sheet", "description": "Optional name", "type": "text" },
+                { "key": "description", "value": "Balance sheet breakdown", "type": "text" },
+                { "key": "tags", "value": "[\"finance\", \"balance-sheet\"]", "type": "text" },
+                { "key": "file", "type": "file", "src": [] }
+              ]
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/upload",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "upload"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Document Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Document File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/download",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "download"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Document File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/preview",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "preview"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Document Metadata",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Q4 Balance Sheet - Final\",\n  \"description\": \"Approved and audited balance sheet\",\n  \"tags\": [\"finance\", \"balance-sheet\", \"final\"]\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Lock/Unlock Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isLocked\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/lock",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "lock"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Archive Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isArchived\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/archive",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "archive"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add/Remove Favorite",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isFavorite\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/favorite",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "favorite"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Soft Delete Document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Copy Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetFolderId\": \"64b22c7a3d2459012f10b2f5\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/copy",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "copy"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Move Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetFolderId\": \"64b22c7a3d2459012f10b2f5\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/move",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "move"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Version History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/documents/{{documentId}}/versions",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "documents", "{{documentId}}", "versions"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Trash",
+      "item": [
+        {
+          "name": "List Soft Deleted Resources",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/trash",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "trash"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Resource",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/trash/{{resourceId}}/restore",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "trash", "{{resourceId}}", "restore"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Permanently Delete Resource",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/trash/{{resourceId}}/permanent",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "trash", "{{resourceId}}", "permanent"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Empty Trash Collection",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/trash/empty",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "trash", "empty"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sharing (Links)",
+      "item": [
+        {
+          "name": "Create Share Link",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expiryDate\": \"2026-12-31T23:59:59Z\",\n  \"password\": \"secret123\",\n  \"isPasswordProtected\": true,\n  \"sharingType\": \"External\",\n  \"permissions\": {\n    \"readOnly\": true,\n    \"download\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/shares/create/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "shares", "create", "{{documentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resolve Share Link (Public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/shares/resolve/:token?password=secret123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "shares", "resolve", ":token"],
+              "query": [
+                { "key": "password", "value": "secret123", "description": "Pass if protected" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Shared File (Public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/shares/download/:token?password=secret123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "shares", "download", ":token"],
+              "query": [
+                { "key": "password", "value": "secret123" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Storage Analytics",
+      "item": [
+        {
+          "name": "Get Storage Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/storage/summary",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "storage", "summary"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Specific Folder Size",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/storage/folder/{{folderId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "storage", "folder", "{{folderId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search & Filters",
+      "item": [
+        {
+          "name": "Global Search & Filtering",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/manager/search?query=Financial&fileType=PDF&status=Active&sortBy=uploadDate&order=desc&page=1&limit=10",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "manager", "search"],
+              "query": [
+                { "key": "query", "value": "Financial", "description": "Matches name, tags, description" },
+                { "key": "fileType", "value": "PDF", "description": "e.g., PDF, DOCX, XLSX" },
+                { "key": "status", "value": "Active", "description": "e.g. Active, Archived" },
+                { "key": "isFavorite", "value": "true", "disabled": true },
+                { "key": "isArchived", "value": "false", "disabled": true },
+                { "key": "isLocked", "value": "false", "disabled": true },
+                { "key": "sortBy", "value": "uploadDate", "description": "name, uploadDate, modifiedDate, fileSize, fileType" },
+                { "key": "order", "value": "desc", "description": "asc or desc" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}

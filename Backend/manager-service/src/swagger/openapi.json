@@ -1,0 +1,461 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Manager Service API Docs",
+    "version": "1.0.0",
+    "description": "Comprehensive endpoints list for DMS manager-service managing assets."
+  },
+  "paths": {
+    "/api/{companySlug}/manager/dashboard": {
+      "get": {
+        "summary": "Get Manager Dashboard Statistics",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Stats successfully retrieved" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/folders": {
+      "post": {
+        "summary": "Create a Folder (optional file uploads)",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "parentFolder": { "type": "string" },
+                  "folderColor": { "type": "string" },
+                  "folderIcon": { "type": "string" },
+                  "files": { "type": "array", "items": { "type": "string", "format": "binary" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Folder created successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/folders/tree": {
+      "get": {
+        "summary": "Get Folders Tree Hierarchy",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Tree retrieved successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/folders/{id}": {
+      "get": {
+        "summary": "Get Folder Details & Child Contents",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Details retrieved successfully" }
+        }
+      },
+      "put": {
+        "summary": "Update Folder Details",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "folderColor": { "type": "string" },
+                  "folderIcon": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Folder updated successfully" }
+        }
+      },
+      "delete": {
+        "summary": "Soft Delete Folder",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Folder soft deleted successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/folders/{id}/move": {
+      "post": {
+        "summary": "Move Folder",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetFolderId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Folder moved successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/folders/{id}/zip": {
+      "get": {
+        "summary": "Download Folder as ZIP File",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "ZIP file returned" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/upload": {
+      "post": {
+        "summary": "Upload a Document (creates new or increments version if file already exists)",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "folderId": { "type": "string" },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "tags": { "type": "array", "items": { "type": "string" } },
+                  "file": { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Document uploaded successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}": {
+      "get": {
+        "summary": "Get Document Details",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Document details retrieved" }
+        }
+      },
+      "put": {
+        "summary": "Update Document Metadata",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "tags": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Metadata updated successfully" }
+        }
+      },
+      "delete": {
+        "summary": "Soft Delete Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Document soft deleted" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/download": {
+      "get": {
+        "summary": "Download Document File",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "File attachment stream" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/preview": {
+      "get": {
+        "summary": "Preview File (Streams PDF, Images, Text directly)",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Inline file stream or redirect" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/lock": {
+      "post": {
+        "summary": "Lock/Unlock Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isLocked": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Lock state updated successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/archive": {
+      "post": {
+        "summary": "Archive/Unarchive Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isArchived": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Archive state toggled successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/favorite": {
+      "post": {
+        "summary": "Favorite/Unfavorite Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isFavorite": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Favorite status updated" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/copy": {
+      "post": {
+        "summary": "Copy Document to Folder",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetFolderId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Document copied successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/documents/{id}/move": {
+      "post": {
+        "summary": "Move Document to Folder",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetFolderId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Document moved successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/trash": {
+      "get": {
+        "summary": "List Soft-deleted Items",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Trash contents retrieved" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/trash/{id}/restore": {
+      "post": {
+        "summary": "Restore Soft-deleted Folder or Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Item restored successfully" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/trash/{id}/permanent": {
+      "delete": {
+        "summary": "Permanently Delete Folder or Document",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Resource permanently deleted" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/trash/empty": {
+      "delete": {
+        "summary": "Empty Trash Collection",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Trash successfully cleared" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/shares/create/{documentId}": {
+      "post": {
+        "summary": "Create Password-protected Share Link",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "documentId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expiryDate": { "type": "string", "format": "date-time" },
+                  "password": { "type": "string" },
+                  "isPasswordProtected": { "type": "boolean" },
+                  "sharingType": { "type": "string", "enum": ["Internal", "External"] },
+                  "permissions": {
+                    "type": "object",
+                    "properties": {
+                      "readOnly": { "type": "boolean" },
+                      "download": { "type": "boolean" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Share link successfully created" }
+        }
+      }
+    },
+    "/api/{companySlug}/manager/search": {
+      "get": {
+        "summary": "Global Search & Filtering across folders/documents",
+        "parameters": [
+          { "name": "companySlug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "query", "in": "query", "schema": { "type": "string" } },
+          { "name": "fileType", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "isFavorite", "in": "query", "schema": { "type": "string" } },
+          { "name": "isArchived", "in": "query", "schema": { "type": "string" } },
+          { "name": "isLocked", "in": "query", "schema": { "type": "string" } },
+          { "name": "sortBy", "in": "query", "schema": { "type": "string" } },
+          { "name": "order", "in": "query", "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Results successfully matching search filters" }
+        }
+      }
+    }
+  }
+}

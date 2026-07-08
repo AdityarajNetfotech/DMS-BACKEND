@@ -1,0 +1,255 @@
+{
+  "info": {
+    "_postman_id": "c1f24d77-628d-4f11-9a9d-e4d25450893a",
+    "name": "DMS API Platform (Auth, Manager, Viewer)",
+    "description": "Comprehensive Postman collection for the Document Management System (DMS) covering Authentication, Manager, and Viewer microservices routed through the API Gateway on port 3000.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication & Setup",
+      "item": [
+        {
+          "name": "User Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"viewer@company.com\",\n  \"password\": \"Password123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/auth/login",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "auth", "login"]
+            },
+            "description": "Authenticates a user and returns a JWT token. Place this token in the Authorization Bearer header for secure endpoints."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Viewer Service (Port 3007 via Gateway)",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/dashboard",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "dashboard"]
+            },
+            "description": "Retrieve aggregate counters for total folders, documents, and favorites, along with recent files."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Folder Tree Hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/folders/tree",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "folders", "tree"]
+            },
+            "description": "Retrieve read-only folder hierarchy structured dynamically."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Folder Details & Contents",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/folders/{{folderId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "folders", "{{folderId}}"]
+            },
+            "description": "Retrieve folder details, list child subfolders, and documents stored inside."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Document Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/documents/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "documents", "{{documentId}}"]
+            },
+            "description": "Retrieve document metadata and list of versions."
+          },
+          "response": []
+        },
+        {
+          "name": "Download Document",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/documents/{{documentId}}/download",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "documents", "{{documentId}}", "download"]
+            },
+            "description": "Increments download counts and streams physical file."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Document inline",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/documents/{{documentId}}/preview",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "documents", "{{documentId}}", "preview"]
+            },
+            "description": "Serves physical file headers inline for preview frames."
+          },
+          "response": []
+        },
+        {
+          "name": "Global Search",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/search?query=quarterly&fileType=PDF&sortBy=name&order=asc&limit=10&page=1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "search"],
+              "query": [
+                { "key": "query", "value": "quarterly" },
+                { "key": "fileType", "value": "PDF" },
+                { "key": "sortBy", "value": "name" },
+                { "key": "order", "value": "asc" },
+                { "key": "limit", "value": "10" },
+                { "key": "page", "value": "1" }
+              ]
+            },
+            "description": "Globally search files and folders with multi-attribute sorting filters."
+          },
+          "response": []
+        },
+        {
+          "name": "List Favorite Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" }
+            ],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/favorites",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "favorites"]
+            },
+            "description": "Lists documents marked as favorites by the current viewer."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Favorite State",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwtToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isFavorite\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/favorites/{{documentId}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "favorites", "{{documentId}}"]
+            },
+            "description": "Add or remove a document from the user's favorites collection."
+          },
+          "response": []
+        },
+        {
+          "name": "Resolve Share Link (Public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/shares/resolve/{{shareToken}}?password=secretPassword",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "shares", "resolve", "{{shareToken}}"],
+              "query": [
+                { "key": "password", "value": "secretPassword", "description": "Required if share link is password-protected" }
+              ]
+            },
+            "description": "Resolves public shared documents. Prompts for password if protected."
+          },
+          "response": []
+        },
+        {
+          "name": "Download Shared File (Public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/{{companySlug}}/viewer/shares/download/{{shareToken}}?password=secretPassword",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "{{companySlug}}", "viewer", "shares", "download", "{{shareToken}}"],
+              "query": [
+                { "key": "password", "value": "secretPassword" }
+              ]
+            },
+            "description": "Downloads the shared document if download permissions are enabled by the manager on the share link."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
