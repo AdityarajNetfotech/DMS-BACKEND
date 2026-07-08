@@ -80,7 +80,7 @@ router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, nex
         companyName: req.tenant.companyName,
         companySlug: req.tenant.companySlug,
         tempPassword,
-        loginUrl: `http://localhost:5173/${req.tenant.companySlug}/login`
+        loginUrl: `${process.env.FRONTEND_URL}/${req.tenant.companySlug}/login`
       })
     }).catch(err => console.error('Failed to call email service:', err.message));
 

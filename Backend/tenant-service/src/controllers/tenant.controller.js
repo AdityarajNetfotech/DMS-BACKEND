@@ -125,7 +125,7 @@ const createTenant = async (req, res, next) => {
         companyName,
         companySlug,
         tempPassword,
-        loginUrl: `http://localhost:5173/${companySlug}/login`,
+        loginUrl: `${process.env.FRONTEND_URL}/${companySlug}/login`,
       }),
     }).catch((err) =>
       console.error('Failed to call email service:', err.message)

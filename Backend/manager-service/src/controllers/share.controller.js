@@ -21,7 +21,7 @@ const createShareLink = async (req, res, next) => {
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
     const shareToken = crypto.randomBytes(16).toString('hex');
-    const shareLink = `http://localhost:3000/api/${tenantId}/manager/shares/resolve/${shareToken}`;
+    const shareLink = `${process.env.BACKEND_URL}/api/${tenantId}/manager/shares/resolve/${shareToken}`;
 
     const { expiryDate, password, isPasswordProtected, sharingType, permissions, sharedWithViewers } = value;
 
@@ -74,7 +74,7 @@ const createFolderShareLink = async (req, res, next) => {
     if (!folder) return res.status(404).json({ success: false, message: 'Folder not found' });
 
     const shareToken = crypto.randomBytes(16).toString('hex');
-    const shareLink = `http://localhost:3000/api/${tenantId}/manager/shares/resolve/${shareToken}`;
+    const shareLink = `${process.env.BACKEND_URL}/api/${tenantId}/manager/shares/resolve/${shareToken}`;
 
     const { expiryDate, password, isPasswordProtected, sharingType, permissions, sharedWithViewers } = value;
 
