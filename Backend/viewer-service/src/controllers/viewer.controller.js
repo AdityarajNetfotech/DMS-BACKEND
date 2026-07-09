@@ -9,8 +9,8 @@ const getDashboardStats = async (req, res, next) => {
     const userId = req.user.userId;
     const objectIdUserId = new (require('mongoose').Types.ObjectId)(userId);
 
-    const totalDocs = await req.Document.countDocuments({ tenantId, isDeleted: false });
-    const totalFolders = await req.Folder.countDocuments({ tenantId, isDeleted: false });
+    const totalDocs = await req.Document.countDocuments({ tenantId, isDeleted: false, isArchived: false });
+    const totalFolders = await req.Folder.countDocuments({ tenantId, isDeleted: false, isArchived: false });
     const favoriteCount = await req.Favorite.countDocuments({ tenantId, userId });
 
     const sharedCount = await req.Share.countDocuments({
@@ -28,10 +28,11 @@ const getDashboardStats = async (req, res, next) => {
     const recentUploadsCount = await req.Document.countDocuments({
       tenantId,
       isDeleted: false,
+      isArchived: false,
       createdAt: { $gte: sevenDaysAgo }
     });
 
-    const recentDocs = await req.Document.find({ tenantId, isDeleted: false })
+    const recentDocs = await req.Document.find({ tenantId, isDeleted: false, isArchived: false })
       .sort({ createdAt: -1 })
       .limit(5)
       .populate({ path: 'uploadedBy', model: req.User, select: 'name' })
@@ -60,7 +61,7 @@ const getDashboardStats = async (req, res, next) => {
     const accountHolderName = currentUser ? currentUser.name : 'Viewer';
 
     const docTypeBreakdown = await req.Document.aggregate([
-      { $match: { tenantId, isDeleted: false } },
+      { $match: { tenantId, isDeleted: false, isArchived: false } },
       { $group: { _id: '$fileType', count: { $sum: 1 }, totalSize: { $sum: '$fileSize' } } },
       { $sort: { count: -1 } }
     ]);
@@ -241,7 +242,7 @@ const globalSearch = async (req, res, next) => {
 
     const skip = (page - 1) * limit;
 
-    const docFilter = { tenantId, isDeleted: false };
+    const docFilter = { tenantId, isDeleted: false, isArchived: false };
     
     if (query) {
       docFilter.$or = [
@@ -472,7 +473,7 @@ const getAllDocuments = async (req, res, next) => {
     const tenantId = req.user.companySlug;
     const userId = req.user.userId;
 
-    const documents = await Document.find({ tenantId, isDeleted: false })
+    const documents = await Document.find({ tenantId, isDeleted: false, isArchived: false })
       .populate('folderId')
       .lean();
     const favorites = await Favorite.find({ tenantId, userId });
