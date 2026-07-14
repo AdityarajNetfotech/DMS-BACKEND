@@ -66,13 +66,16 @@ const getFolderDetails = async (req, res, next) => {
     const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
 
     if (req.params.id === 'root') {
-      const query = { parentFolder: null, tenantId, isDeleted: false };
-      if (deptFilter !== undefined) query.departmentId = deptFilter;
+      const folderQuery = { parentFolder: null, tenantId, isDeleted: false };
+      if (deptFilter !== undefined) folderQuery.departmentId = deptFilter;
 
-      const childFolders = await Folder.find(query)
+      const docQuery = { folderId: null, tenantId, isDeleted: false };
+      if (deptFilter !== undefined) docQuery.departmentId = deptFilter;
+
+      const childFolders = await Folder.find(folderQuery)
         .populate('createdBy', 'name')
         .populate('departmentId', 'name');
-      const documents = await Document.find(query)
+      const documents = await Document.find(docQuery)
         .populate('uploadedBy', 'name')
         .populate('departmentId', 'name');
 

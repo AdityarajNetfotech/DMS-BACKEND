@@ -28,12 +28,18 @@ const documentSchema = new mongoose.Schema({
     ref: 'Folder',
     default: null,
   },
+  departmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Department',
+    default: null,
+  },
   tenantId: {
     type: String,
     required: true,
   },
   uploadedBy: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
   },
   managerId: {

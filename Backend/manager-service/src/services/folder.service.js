@@ -167,7 +167,8 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
         uploadedBy: userId,
         managerId: userId,
         fileSize: file.size,
-        storageUrl: uploadResult.url
+        storageUrl: uploadResult.url,
+        departmentId: req.user.departmentId || null
       });
       await document.save();
       folder.totalDocuments += 1;
