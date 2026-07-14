@@ -175,6 +175,78 @@ app.post('/api/email/forgot-password', async (req, res, next) => {
   }
 });
 
+app.post('/api/email/folder-shared-upload', async (req, res, next) => {
+  try {
+    const { email, managerName, folderName, companyName, portalUrl } = req.body;
+    
+    console.log('Sending Folder Share Upload notification to:', email);
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #334155; margin: 0; padding: 20px; background-color: #f8fafc; }
+  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+  .header { background: linear-gradient(135deg, #10b981, #047857); padding: 40px 20px; text-align: center; color: white; }
+  .header h1 { margin: 0; font-size: 24px; }
+  .header p { margin: 10px 0 0; font-size: 14px; opacity: 0.9; }
+  .content { padding: 30px; }
+  .info-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0; }
+  .info-row { margin-bottom: 12px; }
+  .info-row:last-child { margin-bottom: 0; }
+  .info-label { display: inline-block; width: 130px; font-weight: 700; color: #94a3b8; font-size: 12px; letter-spacing: 0.5px; }
+  .info-value { color: #0f172a; font-size: 14px; font-weight: 500; }
+  .info-value a { color: #10b981; text-decoration: none; }
+  .btn-container { text-align: center; margin-top: 30px; }
+  .btn { display: inline-block; background-color: #10b981; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; }
+  .footer { background-color: #f1f5f9; padding: 20px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Folder Share & Upload Access</h1>
+      <p>Document Management System</p>
+    </div>
+    <div class="content">
+      <h3 style="margin-top:0; color:#0f172a;">Hello!</h3>
+      <p style="line-height: 1.6;">Manager <strong>${managerName}</strong> has shared a folder with you on <strong>${companyName}</strong> and granted you <strong>Upload Access</strong>.</p>
+      <p style="line-height: 1.6;">You can now upload documents and files directly into this folder via your dedicated portal.</p>
+      
+      <div class="info-box">
+        <div class="info-row"><span class="info-label">COMPANY</span> <span class="info-value">${companyName}</span></div>
+        <div class="info-row"><span class="info-label">SHARED FOLDER</span> <span class="info-value">📁 ${folderName}</span></div>
+        <div class="info-row"><span class="info-label">SHARED BY</span> <span class="info-value">${managerName}</span></div>
+        <div class="info-row"><span class="info-label">ACCESS LEVEL</span> <span class="info-value" style="color: #10b981; font-weight: 700;">Upload Enabled (Inbox)</span></div>
+      </div>
+      
+      <div class="btn-container">
+        <a href="${portalUrl}" class="btn">Access Shared Folder &rarr;</a>
+      </div>
+    </div>
+    <div class="footer">
+      &copy; 2026 DMS &mdash; Document Management System.<br>This is an automated email, please do not reply.
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.FROM_EMAIL,
+      to: email,
+      subject: `Upload Access Granted: ${folderName} - ${companyName}`,
+      html
+    });
+
+    res.status(200).json({ success: true, message: 'Notification email sent' });
+  } catch (err) {
+    console.error('Email send failed:', err);
+    next(err);
+  }
+});
+
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3005;

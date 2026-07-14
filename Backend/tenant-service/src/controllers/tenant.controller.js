@@ -190,9 +190,11 @@ const updateTenant = async (req, res, next) => {
       'city',
       'state',
       'zipCode',
+      'postalCode',
       'country',
       'defaultLanguage',
       'timezone',
+      'isActive',
     ];
     const updates = {};
     for (const key of allowedUpdates) {

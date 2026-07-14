@@ -19,7 +19,8 @@ router.get('/', async (req, res, next) => {
         companyName: tenant.companyName,
         logo: tenant.logo || '',
         primaryColor: tenant.primaryColor || '#0B2C87',
-        fontFamily: tenant.fontFamily || 'Inter'
+        fontFamily: tenant.fontFamily || 'Inter',
+        defaultLanguage: tenant.defaultLanguage || 'English'
       }
     });
   } catch (err) {
@@ -31,7 +32,7 @@ router.get('/', async (req, res, next) => {
 router.put('/', authenticate, authorizeRoles('Tenant Admin'), async (req, res, next) => {
   try {
     const { companySlug } = req.params;
-    const { logo, primaryColor, fontFamily } = req.body;
+    const { logo, primaryColor, fontFamily, defaultLanguage } = req.body;
 
     const tenant = await Tenant.findOne({ companySlug });
     if (!tenant) {
@@ -55,6 +56,7 @@ router.put('/', authenticate, authorizeRoles('Tenant Admin'), async (req, res, n
 
     if (primaryColor !== undefined) tenant.primaryColor = primaryColor;
     if (fontFamily !== undefined) tenant.fontFamily = fontFamily;
+    if (defaultLanguage !== undefined) tenant.defaultLanguage = defaultLanguage;
 
     await tenant.save();
 
@@ -65,7 +67,8 @@ router.put('/', authenticate, authorizeRoles('Tenant Admin'), async (req, res, n
         companyName: tenant.companyName,
         logo: tenant.logo,
         primaryColor: tenant.primaryColor,
-        fontFamily: tenant.fontFamily
+        fontFamily: tenant.fontFamily,
+        defaultLanguage: tenant.defaultLanguage
       }
     });
   } catch (err) {

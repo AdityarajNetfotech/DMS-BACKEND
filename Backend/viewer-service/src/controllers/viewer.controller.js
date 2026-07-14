@@ -180,6 +180,30 @@ const downloadDocument = async (req, res, next) => {
     const doc = await Document.findOne({ _id: req.params.id, tenantId });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
+    // Only enforce share checks for Viewers
+    if (req.user.role === 'Viewer') {
+      const Share = req.Share;
+      const userId = req.user.userId;
+
+      const share = await Share.findOne({
+        tenantId,
+        sharingType: 'Internal',
+        $or: [
+          { documentId: doc._id },
+          { folderId: doc.folderId }
+        ],
+        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId)
+      });
+
+      if (!share) {
+        return res.status(403).json({ success: false, message: 'Access denied. This file has not been shared with you.' });
+      }
+
+      if (!share.permissions.download) {
+        return res.status(403).json({ success: false, message: 'Download is disabled for this file.' });
+      }
+    }
+
     doc.downloadCount += 1;
     await doc.save();
 
@@ -208,6 +232,26 @@ const previewDocument = async (req, res, next) => {
 
     const doc = await Document.findOne({ _id: req.params.id, tenantId, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+
+    // Only enforce share checks for Viewers
+    if (req.user.role === 'Viewer') {
+      const Share = req.Share;
+      const userId = req.user.userId;
+
+      const share = await Share.findOne({
+        tenantId,
+        sharingType: 'Internal',
+        $or: [
+          { documentId: doc._id },
+          { folderId: doc.folderId }
+        ],
+        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId)
+      });
+
+      if (!share) {
+        return res.status(403).json({ success: false, message: 'Access denied. This file has not been shared with you.' });
+      }
+    }
 
     if (doc.storageUrl.startsWith('/uploads')) {
       const filePath = path.join(__dirname, '../../', doc.storageUrl);
@@ -528,7 +572,7 @@ const getSharedWithMe = async (req, res, next) => {
     .populate({ path: 'sharedBy', model: req.User, select: 'name email' })
     .lean();
 
-    const documents = shares.map(share => {
+    const items = shares.map(share => {
       if (share.documentId) {
         return {
           _id: share.documentId._id,
@@ -540,7 +584,24 @@ const getSharedWithMe = async (req, res, next) => {
           folderName: share.documentId.folderId ? share.documentId.folderId.name : 'Root',
           createdAt: share.createdAt,
           downloadPermission: share.permissions.download,
-          shareLinkToken: share.shareLink
+          uploadPermission: false,
+          shareLinkToken: share.shareLink,
+          isFolder: false
+        };
+      } else if (share.folderId) {
+        return {
+          _id: share.folderId._id,
+          name: share.folderId.name,
+          fileType: 'Folder',
+          fileSize: 0,
+          sharedBy: share.sharedBy ? share.sharedBy.name : 'System',
+          sharedByEmail: share.sharedBy ? share.sharedBy.email : '',
+          folderName: '',
+          createdAt: share.createdAt,
+          downloadPermission: share.permissions.download,
+          uploadPermission: share.permissions.uploadAllowed || false,
+          shareLinkToken: share.shareLink,
+          isFolder: true
         };
       }
       return null;
@@ -548,8 +609,8 @@ const getSharedWithMe = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: 'Shared documents retrieved successfully.',
-      data: documents,
+      message: 'Shared items retrieved successfully.',
+      data: items,
       errors: null
     });
   } catch (err) { next(err); }

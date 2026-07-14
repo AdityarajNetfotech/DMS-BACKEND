@@ -13,6 +13,18 @@ const superAdminSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  otp: {
+    type: String,
+    default: null,
+  },
+  otpExpiresAt: {
+    type: Date,
+    default: null,
+  },
+  resetToken: {
+    type: String,
+    default: null,
+  },
 }, { timestamps: true });
 
 superAdminSchema.pre('save', async function (next) {

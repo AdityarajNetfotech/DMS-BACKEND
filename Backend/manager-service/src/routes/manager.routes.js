@@ -22,6 +22,52 @@ router.use(tenantResolver);
 router.get('/shares/resolve/:token', managerResolver, shareController.resolveShareLink);
 router.get('/shares/download/:token', managerResolver, shareController.downloadSharedFile);
 
+// Special Upload Route allowing both Manager, Admin, and Viewer roles
+router.post(
+  '/documents/upload',
+  authenticate,
+  authorizeRoles('Manager', 'Tenant Admin', 'Viewer'),
+  managerResolver,
+  upload.single('file'),
+  async (req, res, next) => {
+    try {
+      const userRole = req.user.role;
+      // Managers and Admins can upload to any folder
+      if (userRole === 'Manager' || userRole === 'Tenant Admin') {
+        return next();
+      }
+
+      // Viewers must specify a folderId
+      const { folderId } = req.body;
+      if (!folderId) {
+        return res.status(403).json({ success: false, message: 'Viewers can only upload to shared folders. Please provide a folder ID.' });
+      }
+
+      // Check if folder is shared with the viewer and has uploadAllowed: true
+      const Share = req.Share;
+      const userId = req.user.userId;
+      const tenantId = req.user.companySlug;
+
+      const share = await Share.findOne({
+        tenantId,
+        folderId,
+        sharingType: 'Internal',
+        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId),
+        'permissions.uploadAllowed': true
+      });
+
+      if (!share) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to upload files to this folder.' });
+      }
+
+      next();
+    } catch (err) {
+      next(err);
+    }
+  },
+  documentController.uploadDocument
+);
+
 // Enforce login and Manager role for everything else
 router.use(authenticate, authorizeRoles('Manager', 'Tenant Admin'), managerResolver);
 
@@ -46,7 +92,6 @@ router.post('/folders/:id/archive', folderController.archiveFolder);
 router.post('/folders/:id/favorite', folderController.favoriteFolder);
 
 // Documents
-router.post('/documents/upload', upload.single('file'), documentController.uploadDocument);
 router.get('/documents/:id', documentController.getDocumentDetails);
 router.get('/documents/:id/download', documentController.downloadDocument);
 router.get('/documents/:id/preview', documentController.previewDocument);
@@ -67,8 +112,8 @@ router.delete('/trash/empty', trashController.emptyTrash);
 
 // Sharing
 router.get('/shares', shareController.getSharedItems);
-router.post('/shares/create/:documentId', shareController.createShareLink);
 router.post('/shares/create/folder/:folderId', shareController.createFolderShareLink);
+router.post('/shares/create/:documentId', shareController.createShareLink);
 
 // Storage
 router.get('/storage/summary', storageController.getStorageSummary);

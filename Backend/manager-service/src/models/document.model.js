@@ -5,29 +5,27 @@ const documentSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
+    maxlength: 100,
   },
   originalFileName: {
     type: String,
     required: true,
   },
   fileType: {
-    type: String,
+    type: String, // PDF, XLSX, DOCX, etc.
     required: true,
   },
   mimeType: {
     type: String,
+    required: true,
   },
   extension: {
     type: String,
+    required: true,
   },
   folderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Folder',
-    default: null,
-  },
-  departmentId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Department',
     default: null,
   },
   tenantId: {
@@ -35,49 +33,31 @@ const documentSchema = new mongoose.Schema({
     required: true,
   },
   uploadedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
     required: true,
   },
   managerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
+    required: true,
   },
   fileSize: {
-    type: Number,
+    type: Number, // in bytes
+    required: true,
+  },
+  storageUrl: {
+    type: String, // local path or Cloudinary URL
     required: true,
   },
   versionNumber: {
     type: Number,
     default: 1,
   },
-  description: {
-    type: String,
-    trim: true,
-  },
-  tags: {
-    type: [String],
-    default: [],
-  },
-  storageUrl: {
-    type: String,
-    required: true,
-  },
-  thumbnailUrl: {
-    type: String,
-  },
-  status: {
-    type: String,
-    enum: ['Active', 'Locked', 'Archived'],
-    default: 'Active',
-  },
   isLocked: {
     type: Boolean,
     default: false,
   },
   lockedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
     default: null,
   },
   isArchived: {
@@ -88,6 +68,24 @@ const documentSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  downloadCount: {
+    type: Number,
+    default: 0,
+  },
+  tags: [String],
+  description: {
+    type: String,
+    default: '',
+  },
+  status: {
+    type: String,
+    enum: ['Active', 'Archived', 'Locked'],
+    default: 'Active',
+  },
+  extractedText: {
+    type: String,
+    default: '',
+  },
   isDeleted: {
     type: Boolean,
     default: false,
@@ -95,13 +93,10 @@ const documentSchema = new mongoose.Schema({
   deletedAt: {
     type: Date,
     default: null,
-  },
-  downloadCount: {
-    type: Number,
-    default: 0,
   }
 }, { timestamps: true });
 
-documentSchema.index({ name: 1, folderId: 1, tenantId: 1 });
+// Check duplicate documents within the same folder per tenant
+documentSchema.index({ name: 1, folderId: 1, tenantId: 1 }, { unique: true });
 
 module.exports = documentSchema;

@@ -53,8 +53,8 @@ const copyMoveDocumentSchema = Joi.object({
   targetFolderId: Joi.string().hex().length(24).allow(null, '').required()
 });
 
-const createShareSchema = Joi.object({
-  expiryDate: Joi.date().greater('now').allow(null),
+const createDocumentShareSchema = Joi.object({
+  expiryDate: Joi.date().allow(null),
   password: Joi.string().min(4).allow(null, ''),
   isPasswordProtected: Joi.boolean().default(false),
   sharingType: Joi.string().valid('Internal', 'External').default('External'),
@@ -64,6 +64,21 @@ const createShareSchema = Joi.object({
   }).default(),
   sharedWithViewers: Joi.array().items(Joi.string().hex().length(24)).allow(null)
 });
+
+const createFolderShareSchema = Joi.object({
+  expiryDate: Joi.date().allow(null),
+  password: Joi.string().min(4).allow(null, ''),
+  isPasswordProtected: Joi.boolean().default(false),
+  sharingType: Joi.string().valid('Internal', 'External').default('External'),
+  permissions: Joi.object({
+    readOnly: Joi.boolean().default(true),
+    download: Joi.boolean().default(true),
+    uploadAllowed: Joi.boolean().default(false)
+  }).default(),
+  sharedWithViewers: Joi.array().items(Joi.string().hex().length(24)).allow(null)
+});
+
+const createShareSchema = createDocumentShareSchema;
 
 module.exports = {
   createFolderSchema,
@@ -75,6 +90,8 @@ module.exports = {
   favoriteDocumentSchema,
   copyMoveDocumentSchema,
   createShareSchema,
+  createDocumentShareSchema,
+  createFolderShareSchema,
   lockFolderSchema,
   archiveFolderSchema,
   favoriteFolderSchema

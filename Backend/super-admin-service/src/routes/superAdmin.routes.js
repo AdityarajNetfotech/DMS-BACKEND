@@ -6,6 +6,9 @@ const { authenticate, authorizeRoles } = require('../shared/auth.middleware');
 
 router.post('/register', superAdminController.register);
 router.post('/login', superAdminController.login);
+router.post('/forgot-password', superAdminController.forgotPassword);
+router.post('/verify-otp', superAdminController.verifyOtp);
+router.post('/reset-password', superAdminController.resetPassword);
 router.post('/enquiry', superAdminController.createEnquiry); // Public
 
 router.get('/enquiries', authenticate, authorizeRoles('SuperAdmin'), superAdminController.getEnquiries);

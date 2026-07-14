@@ -28,11 +28,12 @@ router.get('/profile', async (req, res, next) => {
 // Update profile of current user
 router.put('/profile', async (req, res, next) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, phone } = req.body;
     const user = await req.User.findById(req.user.userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (name) user.name = name;
+    if (phone !== undefined) user.phone = phone;
     if (email && email.toLowerCase() !== user.email.toLowerCase()) {
       const existingUser = await req.User.findOne({ email: email.toLowerCase() });
       if (existingUser) {

@@ -2,11 +2,11 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const activityService = require('../services/activity.service');
-const { createShareSchema } = require('../validators/manager.validator');
+const { createDocumentShareSchema, createFolderShareSchema } = require('../validators/manager.validator');
 
 const createShareLink = async (req, res, next) => {
   try {
-    const { error, value } = createShareSchema.validate(req.body);
+    const { error, value } = createDocumentShareSchema.validate(req.body);
     if (error) {
       return res.status(422).json({ success: false, message: error.details[0].message, errors: error.details });
     }
@@ -59,7 +59,7 @@ const createShareLink = async (req, res, next) => {
 
 const createFolderShareLink = async (req, res, next) => {
   try {
-    const { error, value } = createShareSchema.validate(req.body);
+    const { error, value } = createFolderShareSchema.validate(req.body);
     if (error) {
       return res.status(422).json({ success: false, message: error.details[0].message, errors: error.details });
     }
@@ -73,14 +73,15 @@ const createFolderShareLink = async (req, res, next) => {
     const folder = await Folder.findOne({ _id: folderId, tenantId, isDeleted: false });
     if (!folder) return res.status(404).json({ success: false, message: 'Folder not found' });
 
+    const { expiryDate, password, isPasswordProtected, sharingType, permissions, sharedWithViewers } = value;
+
     const shareToken = crypto.randomBytes(16).toString('hex');
     const shareLink = `${process.env.BACKEND_URL}/api/${tenantId}/manager/shares/resolve/${shareToken}`;
-
-    const { expiryDate, password, isPasswordProtected, sharingType, permissions, sharedWithViewers } = value;
 
     const share = new Share({
       tenantId,
       folderId,
+      documentId: null,
       sharedBy: userId,
       shareLink: shareToken,
       expiryDate,
@@ -92,8 +93,35 @@ const createFolderShareLink = async (req, res, next) => {
     });
 
     await share.save();
-
     await activityService.logActivity(req, 'Folder Shared', 'Folder', folder._id);
+
+    // Send email notifications to internally shared Viewers if upload is allowed
+    if (sharingType === 'Internal' && permissions && permissions.uploadAllowed === true && sharedWithViewers && sharedWithViewers.length > 0) {
+      try {
+        const manager = await req.User.findById(userId).select('name');
+        const managerName = manager ? manager.name : 'A Manager';
+        const viewers = await req.User.find({ _id: { $in: sharedWithViewers } }).select('email name');
+        const EMAIL_URL = process.env.EMAIL_SERVICE_URL || 'http://email-service:3005';
+        const companyName = req.user.companyName || 'DMS Platform';
+        const portalUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/${tenantId}/login`;
+
+        for (const viewer of viewers) {
+          fetch(`${EMAIL_URL}/api/email/folder-shared-upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: viewer.email,
+              managerName,
+              folderName: folder.name,
+              companyName,
+              portalUrl
+            })
+          }).catch(err => console.error(`Failed to send email to ${viewer.email}:`, err));
+        }
+      } catch (emailErr) {
+        console.error('Failed to trigger email notifications:', emailErr);
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -109,6 +137,7 @@ const createFolderShareLink = async (req, res, next) => {
     });
   } catch (err) { next(err); }
 };
+
 
 const resolveShareLink = async (req, res, next) => {
   try {

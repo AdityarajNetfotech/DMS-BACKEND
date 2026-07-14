@@ -26,6 +26,93 @@ const login = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const superAdmin = await SuperAdmin.findOne({ email });
+    if (!superAdmin) return res.status(404).json({ success: false, message: 'Super Admin not found' });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60000); // 10 minutes
+
+    superAdmin.otp = await bcrypt.hash(otp, 10);
+    superAdmin.otpExpiresAt = otpExpiresAt;
+    superAdmin.resetToken = null;
+    await superAdmin.save();
+
+    const EMAIL_URL = process.env.EMAIL_SERVICE_URL || 'http://email-service:3005';
+    fetch(`${EMAIL_URL}/api/email/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: superAdmin.email,
+        companyName: 'DMS Platform',
+        otp: otp
+      })
+    }).catch(err => console.error('Failed to trigger email service:', err));
+
+    res.status(200).json({ success: true, message: 'OTP sent to email' });
+  } catch (err) { next(err); }
+};
+
+const verifyOtp = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+    const superAdmin = await SuperAdmin.findOne({ email });
+    if (!superAdmin || !superAdmin.otp || !superAdmin.otpExpiresAt) {
+      return res.status(400).json({ success: false, message: 'Invalid request' });
+    }
+
+    if (new Date() > superAdmin.otpExpiresAt) {
+      return res.status(400).json({ success: false, message: 'OTP has expired' });
+    }
+
+    const isValid = await bcrypt.compare(otp, superAdmin.otp);
+    if (!isValid) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    superAdmin.resetToken = await bcrypt.hash(resetToken, 10);
+    superAdmin.otp = null;
+    superAdmin.otpExpiresAt = null;
+    await superAdmin.save();
+
+    res.status(200).json({ success: true, resetToken });
+  } catch (err) { next(err); }
+};
+
+const resetPassword = async (req, res, next) => {
+  try {
+    const { email, resetToken, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+    }
+
+    const hasUppercase = /[A-Z]/.test(newPassword);
+    const hasLowercase = /[a-z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
+
+    if (!hasUppercase || !hasLowercase || !hasNumber || !hasSpecial) {
+      return res.status(400).json({ success: false, message: 'Password must include uppercase, lowercase, number and special character.' });
+    }
+
+    const superAdmin = await SuperAdmin.findOne({ email });
+    if (!superAdmin || !superAdmin.resetToken) return res.status(400).json({ success: false, message: 'Invalid request' });
+
+    const isValid = await bcrypt.compare(resetToken, superAdmin.resetToken);
+    if (!isValid) return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+
+    superAdmin.password = newPassword;
+    superAdmin.resetToken = null;
+    await superAdmin.save();
+
+    res.status(200).json({ success: true, message: 'Password reset successfully' });
+  } catch (err) { next(err); }
+};
+
 const Enquiry = require('../shared/models/enquiry.model');
 
 const createEnquiry = async (req, res, next) => {
@@ -53,7 +140,7 @@ const getDashboardStats = async (req, res, next) => {
   try {
     const Tenant = require('../shared/models/tenant.model');
     const allTenants = await Tenant.find().sort({ createdAt: -1 });
-    
+
     let totalDocuments = 0;
     let totalFolders = 0;
     let totalUsers = 0;
@@ -70,7 +157,7 @@ const getDashboardStats = async (req, res, next) => {
       img: { name: 'Image', value: 0, color: '#f6b51d' },
       other: { name: 'Other', value: 0, color: '#c8d0de' }
     };
-    
+
     const topCompaniesData = [];
 
     // Concurrently aggregate from all tenant DBs
@@ -78,7 +165,7 @@ const getDashboardStats = async (req, res, next) => {
       try {
         if (!tenant.dbUri) return;
         const tenantDb = await getTenantConnection(tenant.companySlug, tenant.dbUri);
-        
+
         if (tenantDb.readyState !== 1) {
           await tenantDb.asPromise();
         }
@@ -86,7 +173,7 @@ const getDashboardStats = async (req, res, next) => {
         const docCount = await tenantDb.db.collection('documents').countDocuments();
         const folderCount = await tenantDb.db.collection('folders').countDocuments();
         const userCount = await tenantDb.db.collection('users').countDocuments();
-        
+
         totalDocuments += docCount;
         totalFolders += folderCount;
         totalUsers += userCount;
@@ -146,7 +233,7 @@ const getDashboardStats = async (req, res, next) => {
     }));
 
     const totalCompanies = allTenants.length;
-    const activeCompanies = allTenants.filter(t => t.isActive !== false).length; 
+    const activeCompanies = allTenants.filter(t => t.isActive !== false).length;
 
     const companiesList = allTenants.map(t => [
       t.companyName,
@@ -217,7 +304,7 @@ const getDashboardStats = async (req, res, next) => {
 const replyEnquiry = async (req, res, next) => {
   try {
     const { email, subject, message, replyFrom } = req.body;
-    
+
     // Call internal email-service
     const emailRes = await fetch(process.env.EMAIL_SERVICE_URL + '/api/email/reply', {
       method: 'POST',
@@ -237,4 +324,4 @@ const replyEnquiry = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, createEnquiry, getEnquiries, getDashboardStats, replyEnquiry };
+module.exports = { register, login, forgotPassword, verifyOtp, resetPassword, createEnquiry, getEnquiries, getDashboardStats, replyEnquiry };

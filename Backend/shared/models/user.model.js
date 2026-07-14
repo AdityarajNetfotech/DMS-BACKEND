@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema({
     ref: 'Department',
     default: null,
   },
+  phone: {
+    type: String,
+    default: '',
+  },
   isActive: {
     type: Boolean,
     default: true,

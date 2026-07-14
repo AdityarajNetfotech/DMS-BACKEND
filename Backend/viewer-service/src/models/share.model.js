@@ -50,6 +50,10 @@ const shareSchema = new mongoose.Schema({
     download: {
       type: Boolean,
       default: true,
+    },
+    uploadAllowed: {
+      type: Boolean,
+      default: false,
     }
   },
   sharedWithViewers: [{
