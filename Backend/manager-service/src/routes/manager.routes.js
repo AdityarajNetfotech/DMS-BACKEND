@@ -14,6 +14,7 @@ const storageController = require('../controllers/storage.controller');
 const searchController = require('../controllers/search.controller');
 const recentController = require('../controllers/recent.controller');
 const archiveController = require('../controllers/archive.controller');
+const aiController = require('../controllers/ai.controller');
 
 // Resolve tenant and enforce authorization for all routes
 router.use(tenantResolver);
@@ -91,7 +92,10 @@ router.post('/folders/:id/lock', folderController.lockFolder);
 router.post('/folders/:id/archive', folderController.archiveFolder);
 router.post('/folders/:id/favorite', folderController.favoriteFolder);
 
+router.post('/folders/:id/summarize', aiController.summarizeFolder);
+
 // Documents
+router.post('/documents/:id/summarize', aiController.summarizeDocument);
 router.get('/documents/:id', documentController.getDocumentDetails);
 router.get('/documents/:id/download', documentController.downloadDocument);
 router.get('/documents/:id/preview', documentController.previewDocument);
@@ -103,6 +107,7 @@ router.delete('/documents/:id', documentController.softDeleteDocument);
 router.post('/documents/:id/copy', documentController.copyDocument);
 router.post('/documents/:id/move', documentController.moveDocument);
 router.get('/documents/:id/versions', documentController.getVersionHistory);
+router.post('/documents/:id/convert', documentController.convertDocument);
 
 // Trash
 router.get('/trash', trashController.getTrashList);

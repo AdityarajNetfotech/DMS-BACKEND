@@ -257,6 +257,22 @@ const getVersionHistory = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const convertDocument = async (req, res, next) => {
+  try {
+    const { targetFormat } = req.body;
+    if (!targetFormat) {
+      return res.status(400).json({ success: false, message: 'Target format is required' });
+    }
+    const result = await documentService.convertDocument(req, req.params.id, targetFormat.toUpperCase());
+    res.status(200).json({
+      success: true,
+      message: `Document converted to ${targetFormat} successfully.`,
+      data: result,
+      errors: null
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   uploadDocument,
   getDocumentDetails,
@@ -269,5 +285,6 @@ module.exports = {
   softDeleteDocument,
   copyDocument,
   moveDocument,
-  getVersionHistory
+  getVersionHistory,
+  convertDocument
 };

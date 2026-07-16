@@ -1,5 +1,9 @@
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const AdmZip = require('adm-zip');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
 const storageHelper = require('../helpers/storage.helper');
 const storageService = require('./storage.service');
 const activityService = require('./activity.service');
@@ -353,6 +357,380 @@ const moveDocument = async (req, docId, targetFolderId) => {
   return doc;
 };
 
+const escapeXml = (unsafe) => {
+  return unsafe.replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+};
+
+const createWordDocxBuffer = (originalName, textContent) => {
+  const zip = new AdmZip();
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+  const escapedText = escapeXml(textContent);
+  const paragraphs = escapedText.split('\n').map(line => 
+    `<w:p><w:r><w:t>${line}</w:t></w:r></w:p>`
+  ).join('');
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:jc w:val="center"/></w:pPr>
+      <w:r>
+        <w:rPr><w:b/><w:sz w:val="32"/></w:rPr>
+        <w:t>CONVERTED DOCUMENT</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr><w:i/></w:rPr>
+        <w:t>Original File: ${escapeXml(originalName)}</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr><w:i/></w:rPr>
+        <w:t>Converted On: ${escapeXml(new Date().toLocaleString())}</w:t>
+      </w:r>
+    </w:p>
+    <w:p><w:r><w:t></w:t></w:r></w:p>
+    ${paragraphs}
+  </w:body>
+</w:document>`;
+  zip.addFile('[Content_Types].xml', Buffer.from(contentTypesXml));
+  zip.addFile('_rels/.rels', Buffer.from(relsXml));
+  zip.addFile('word/document.xml', Buffer.from(documentXml));
+  return zip.toBuffer();
+};
+
+const createExcelXlsxBuffer = (originalName, textContent) => {
+  const zip = new AdmZip();
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`;
+  const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+  const escapedText = escapeXml(textContent);
+  const rows = escapedText.split('\n').map((line, idx) => 
+    `<row r="${idx + 5}"><c r="A${idx + 5}" t="inlineStr"><is><t>${line}</t></is></c></row>`
+  ).join('');
+  const sheet1Xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>CONVERTED SPREADSHEET</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>Original File: ${escapeXml(originalName)}</t></is></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>Converted On: ${escapeXml(new Date().toLocaleString())}</t></is></c>
+    </row>
+    <row r="4">
+      <c r="A4" t="inlineStr"><is><t></t></is></c>
+    </row>
+    ${rows}
+  </sheetData>
+</worksheet>`;
+  zip.addFile('[Content_Types].xml', Buffer.from(contentTypesXml));
+  zip.addFile('_rels/.rels', Buffer.from(relsXml));
+  zip.addFile('xl/workbook.xml', Buffer.from(workbookXml));
+  zip.addFile('xl/_rels/workbook.xml.rels', Buffer.from(workbookRelsXml));
+  zip.addFile('xl/worksheets/sheet1.xml', Buffer.from(sheet1Xml));
+  return zip.toBuffer();
+};
+
+const createPptxBuffer = (originalName, textContent) => {
+  const zip = new AdmZip();
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`;
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`;
+  const presentationRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`;
+  const presentationXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId1"/>
+  </p:sldIdLst>
+  <p:notesSz cx="6858000" cy="9144000"/>
+</p:presentation>`;
+  const escapedText = escapeXml(textContent);
+  const slide1Xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr/>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="2" name="Title 1"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr/>
+        <p:txBody>
+          <p:bodyPr/>
+          <p:lstStyle/>
+          <p:p>
+            <p:r>
+              <p:rPr lang="en-US" sz="4400"/>
+              <p:t>Converted Presentation</p:t>
+            </p:r>
+          </p:p>
+          <p:p>
+            <p:r>
+              <p:rPr lang="en-US" sz="2000"/>
+              <p:t>Original File: ${escapeXml(originalName)}</p:t>
+            </p:r>
+          </p:p>
+          <p:p>
+            <p:r>
+              <p:rPr lang="en-US" sz="1600"/>
+              <p:t>${escapeXml(escapedText.substring(0, 1000))}</p:t>
+            </p:r>
+          </p:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`;
+  zip.addFile('[Content_Types].xml', Buffer.from(contentTypesXml));
+  zip.addFile('_rels/.rels', Buffer.from(relsXml));
+  zip.addFile('ppt/presentation.xml', Buffer.from(presentationXml));
+  zip.addFile('ppt/_rels/presentation.xml.rels', Buffer.from(presentationRelsXml));
+  zip.addFile('ppt/slides/slide1.xml', Buffer.from(slide1Xml));
+  return zip.toBuffer();
+};
+
+const fetchRemoteFileBuffer = (url) => {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Failed to download file from remote: Status ${res.statusCode}`));
+        return;
+      }
+      const data = [];
+      res.on('data', (chunk) => data.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(data)));
+      res.on('error', (err) => reject(err));
+    }).on('error', (err) => reject(err));
+  });
+};
+
+const convertDocument = async (req, docId, targetFormat) => {
+  const Document = req.Document;
+  const Folder = req.Folder;
+  const tenantId = req.user.companySlug;
+  const userId = req.user.userId;
+
+  const doc = await Document.findOne({ _id: docId, tenantId, isDeleted: false });
+  if (!doc) throw new Error('Document not found');
+
+  // Load existing file content if possible, otherwise use a placeholder text
+  let rawBuffer = null;
+  if (doc.storageUrl.startsWith('/uploads')) {
+    const filePath = path.join(__dirname, '../../', doc.storageUrl);
+    if (fs.existsSync(filePath)) {
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.size < 10 * 1024 * 1024) { // Only read files smaller than 10MB
+          rawBuffer = fs.readFileSync(filePath);
+        }
+      } catch (err) {
+        console.error('Failed to read local file:', err);
+      }
+    }
+  } else if (doc.storageUrl.startsWith('http')) {
+    try {
+      rawBuffer = await fetchRemoteFileBuffer(doc.storageUrl);
+    } catch (err) {
+      console.error('Failed to download remote file for conversion:', err);
+    }
+  }
+
+  let originalText = `Document: ${doc.name}`;
+  if (rawBuffer) {
+    const fileTypeUpper = doc.fileType.toUpperCase();
+    if (fileTypeUpper === 'PDF') {
+      try {
+        const pdfData = await pdfParse(rawBuffer);
+        originalText = pdfData.text || `Document: ${doc.name}`;
+      } catch (err) {
+        console.error('PDF parsing failed:', err);
+      }
+    } else if (fileTypeUpper === 'DOCX') {
+      try {
+        const docxData = await mammoth.extractRawText({ buffer: rawBuffer });
+        originalText = docxData.value || `Document: ${doc.name}`;
+      } catch (err) {
+        console.error('DOCX parsing failed:', err);
+      }
+    } else if (['XLSX', 'PPTX'].includes(fileTypeUpper)) {
+      // For spreadsheet/slides, fall back to printable strings extraction
+      const matches = rawBuffer.toString('binary').match(/[ -~]{4,}/g);
+      if (matches) {
+        originalText = matches
+          .filter(str => {
+            if (/^[0-9a-fA-F]{8,}$/.test(str)) return false;
+            if (str.includes('<?xml') || str.includes('<Relationship') || str.includes('schema')) return false;
+            return true;
+          })
+          .slice(0, 150)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .substring(0, 5000);
+      }
+    } else {
+      // Normal plain text files
+      originalText = rawBuffer.toString('utf8');
+    }
+  }
+
+  // Create temporary filename
+  const convertedName = `${path.basename(doc.name, path.extname(doc.name))}.${targetFormat.toLowerCase()}`;
+  const tempDir = path.join(__dirname, '../../uploads/temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const tempFilePath = path.join(tempDir, `${Date.now()}_${convertedName}`);
+
+  let fileContent = '';
+  let mimeType = 'text/plain';
+
+  if (targetFormat === 'PDF') {
+    mimeType = 'application/pdf';
+    // Clean text for basic PDF format
+    const cleanedText = originalText.replace(/[\(\)\\]/g, '\\$&').replace(/\n/g, ') Tj T* (');
+    const pdfBody = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 595.275 841.889] /Contents 5 0 R >>\nendobj\n4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n5 0 obj\n<< /Length ${cleanedText.length + 100} >>\nstream\nBT\n/F1 12 Tf\n30 800 Td\n15 TL\n(${cleanedText}) Tj\nET\nendstream\nendobj\nxref\n0 6\n0000000000 65535 f\n0000000009 00000 n\n0000000056 00000 n\n0000000111 00000 n\n0000000250 00000 n\n0000000321 00000 n\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n420\n%%EOF`;
+    fileContent = Buffer.from(pdfBody);
+  } else if (targetFormat === 'HTML') {
+    mimeType = 'text/html';
+    fileContent = `<!DOCTYPE html>
+<html>
+<head>
+  <title>${doc.name} - Converted</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; line-height: 1.6; color: #333; }
+    h1 { color: #1e3a8a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+    pre { background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>${doc.name}</h1>
+  <p><strong>Original File:</strong> ${doc.originalFileName} (${doc.fileType})</p>
+  <p><strong>Converted On:</strong> ${new Date().toLocaleString()}</p>
+  <hr/>
+  <pre>${originalText}</pre>
+</body>
+</html>`;
+  } else if (targetFormat === 'DOCX') {
+    mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    fileContent = createWordDocxBuffer(doc.originalFileName, originalText);
+  } else if (targetFormat === 'XLSX') {
+    mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    fileContent = createExcelXlsxBuffer(doc.originalFileName, originalText);
+  } else if (targetFormat === 'PPTX') {
+    mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    fileContent = createPptxBuffer(doc.originalFileName, originalText);
+  } else {
+    // Default to TXT
+    mimeType = 'text/plain';
+    fileContent = `--- CONVERTED DOCUMENT ---
+Original Name: ${doc.originalFileName}
+Original Type: ${doc.fileType}
+Converted At: ${new Date().toLocaleString()}
+-----------------------------------
+
+${originalText}`;
+  }
+
+  fs.writeFileSync(tempFilePath, fileContent);
+
+  // Upload the temp file to storage (local or cloudinary)
+  const mockFile = {
+    path: tempFilePath,
+    originalname: convertedName,
+    size: Buffer.byteLength(fileContent),
+    mimetype: mimeType
+  };
+
+  const uploadResult = await storageHelper.uploadToStorage(mockFile);
+
+  // Increment storage limits
+  await storageService.checkAndIncrementStorage(req, mockFile.size);
+
+  const convertedDoc = new Document({
+    name: `${doc.name} (${targetFormat})`,
+    originalFileName: convertedName,
+    fileType: targetFormat,
+    mimeType: mimeType,
+    extension: `.${targetFormat.toLowerCase()}`,
+    folderId: doc.folderId,
+    tenantId,
+    uploadedBy: userId,
+    managerId: userId,
+    fileSize: mockFile.size,
+    storageUrl: uploadResult.url,
+    description: `Converted from ${doc.originalFileName} to ${targetFormat}`,
+    tags: [...doc.tags, 'converted'],
+    departmentId: doc.departmentId
+  });
+
+  await convertedDoc.save();
+
+  if (doc.folderId) {
+    await Folder.findByIdAndUpdate(doc.folderId, { $inc: { totalDocuments: 1 } });
+  }
+
+  await activityService.logActivity(req, `Document Converted to ${targetFormat}`, 'Document', convertedDoc._id);
+  return convertedDoc;
+};
+
 module.exports = {
   uploadDocument,
   updateDocumentDetails,
@@ -363,5 +741,6 @@ module.exports = {
   restoreDocument,
   permanentlyDeleteDocument,
   copyDocument,
-  moveDocument
+  moveDocument,
+  convertDocument
 };
