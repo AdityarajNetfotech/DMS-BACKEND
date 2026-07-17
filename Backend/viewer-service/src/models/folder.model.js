@@ -64,7 +64,7 @@ const folderSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Avoid duplicate folder names under the same parent folder per tenant
-folderSchema.index({ name: 1, parentFolder: 1, tenantId: 1 }, { unique: true });
+// Make folder name unique inside the same parent folder per tenant and department
+folderSchema.index({ name: 1, parentFolder: 1, tenantId: 1, departmentId: 1 }, { unique: true });
 
 module.exports = folderSchema;

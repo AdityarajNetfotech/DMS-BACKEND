@@ -11,7 +11,10 @@ const viewerResolver = (req, res, next) => {
   }
 
   try {
-    if (!req.tenantDb.models.Folder) req.tenantDb.model('Folder', folderSchema);
+    if (!req.tenantDb.models.Folder) {
+      req.tenantDb.model('Folder', folderSchema);
+      req.tenantDb.model('Folder').collection.dropIndex('name_1_parentFolder_1_tenantId_1').catch(() => {});
+    }
     if (!req.tenantDb.models.Document) req.tenantDb.model('Document', documentSchema);
     if (!req.tenantDb.models.Favorite) req.tenantDb.model('Favorite', favoriteSchema);
     if (!req.tenantDb.models.ActivityLog) req.tenantDb.model('ActivityLog', activityLogSchema);

@@ -273,14 +273,15 @@ const restoreFolder = async (req, folderId) => {
   }
 
   // Find or create "Trash" folder at root level (safely handling soft-deleted duplicates)
-  let trashFolder = await Folder.findOne({ tenantId, name: 'Trash', parentFolder: null });
+  let trashFolder = await Folder.findOne({ tenantId, name: 'Trash', parentFolder: null, departmentId: req.user.departmentId || null });
   if (!trashFolder) {
     trashFolder = new Folder({
       name: 'Trash',
       parentFolder: null,
       tenantId,
       createdBy: req.user.userId,
-      isDeleted: false
+      isDeleted: false,
+      departmentId: req.user.departmentId || null
     });
     await trashFolder.save();
     await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id);

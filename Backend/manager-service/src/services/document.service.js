@@ -238,14 +238,15 @@ const restoreDocument = async (req, docId) => {
   if (!doc) throw new Error('Document not found in Trash');
 
   // Find or create "Trash" folder at root level (safely handling soft-deleted duplicates)
-  let trashFolder = await Folder.findOne({ tenantId, name: 'Trash', parentFolder: null });
+  let trashFolder = await Folder.findOne({ tenantId, name: 'Trash', parentFolder: null, departmentId: req.user.departmentId || null });
   if (!trashFolder) {
     trashFolder = new Folder({
       name: 'Trash',
       parentFolder: null,
       tenantId,
       createdBy: req.user.userId,
-      isDeleted: false
+      isDeleted: false,
+      departmentId: req.user.departmentId || null
     });
     await trashFolder.save();
     await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id);
@@ -547,19 +548,12 @@ const createPptxBuffer = (originalName, textContent) => {
   return zip.toBuffer();
 };
 
-const fetchRemoteFileBuffer = (url) => {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`Failed to download file from remote: Status ${res.statusCode}`));
-        return;
-      }
-      const data = [];
-      res.on('data', (chunk) => data.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(data)));
-      res.on('error', (err) => reject(err));
-    }).on('error', (err) => reject(err));
-  });
+const fetchRemoteFileBuffer = async (url) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download file from remote: Status ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 };
 
 const convertDocument = async (req, docId, targetFormat) => {
@@ -573,7 +567,18 @@ const convertDocument = async (req, docId, targetFormat) => {
 
   // Load existing file content if possible, otherwise use a placeholder text
   let rawBuffer = null;
-  if (doc.storageUrl.startsWith('/uploads')) {
+  if (doc.storageUrl.includes('/uploads/')) {
+    const parts = doc.storageUrl.split('/uploads/');
+    const fileName = parts[parts.length - 1];
+    const filePath = path.join(__dirname, '../../uploads', fileName);
+    if (fs.existsSync(filePath)) {
+      try {
+        rawBuffer = fs.readFileSync(filePath);
+      } catch (err) {
+        console.error('Failed to read local file:', err);
+      }
+    }
+  } else if (doc.storageUrl.startsWith('/uploads')) {
     const filePath = path.join(__dirname, '../../', doc.storageUrl);
     if (fs.existsSync(filePath)) {
       try {
