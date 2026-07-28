@@ -273,6 +273,19 @@ const convertDocument = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const restoreDocumentVersion = async (req, res, next) => {
+  try {
+    const { id, versionId } = req.params;
+    const doc = await documentService.restoreVersion(req, id, versionId);
+    res.status(200).json({
+      success: true,
+      message: 'Document version restored successfully.',
+      data: doc,
+      errors: null
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   uploadDocument,
   getDocumentDetails,
@@ -286,5 +299,6 @@ module.exports = {
   copyDocument,
   moveDocument,
   getVersionHistory,
-  convertDocument
+  convertDocument,
+  restoreDocumentVersion
 };

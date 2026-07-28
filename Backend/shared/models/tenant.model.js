@@ -20,6 +20,10 @@ const tenantSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  registrationDate: {
+    type: Date,
+    default: Date.now,
+  },
   gstNumber: {
     type: String,
     default: '',
@@ -132,6 +136,44 @@ const tenantSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true,
+  },
+  trialEndsAt: {
+    type: Date,
+    default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  },
+  subscription: {
+    plan: {
+      type: String,
+      enum: ['Trial', 'Basic', 'Pro', 'Ultra'],
+      default: 'Trial'
+    },
+    status: {
+      type: String,
+      enum: ['active', 'expired', 'past_due', 'cancelled'],
+      default: 'active'
+    },
+    razorpayOrderId: {
+      type: String,
+      default: ''
+    },
+    razorpayPaymentId: {
+      type: String,
+      default: ''
+    },
+    expiresAt: {
+      type: Date,
+      default: null
+    }
+  },
+  aiUsage: {
+    count: {
+      type: Number,
+      default: 0
+    },
+    resetDate: {
+      type: Date,
+      default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    }
   }
 }, { timestamps: true });
 

@@ -58,6 +58,32 @@ router.get('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, next
 // Create User
 router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, next) => {
   try {
+    // 1. Check if subscription is expired/locked
+    if (req.isAccessLocked) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your subscription has expired. Please upgrade or renew your plan to continue using this service.'
+      });
+    }
+
+    // 2. Check user creation limit based on plan
+    const userCount = await req.User.countDocuments();
+    const plan = req.tenant?.subscription?.plan || 'Trial';
+    let maxUsers = 3;
+    if (plan === 'Basic') maxUsers = 10;
+    else if (plan === 'Pro') maxUsers = 50;
+    else if (plan === 'Ultra') maxUsers = Infinity;
+
+    if (userCount >= maxUsers) {
+      const errorMsg = plan === 'Trial'
+        ? `Free trial limit reached: Maximum of ${maxUsers} users allowed.`
+        : `Subscription limit reached: Maximum of ${maxUsers} users allowed on the ${plan} plan.`;
+      return res.status(403).json({
+        success: false,
+        message: errorMsg
+      });
+    }
+
     const { name, email, role, password, departmentId } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
     if (!['Manager', 'Viewer'].includes(role)) return res.status(400).json({ success: false, message: 'Invalid role' });

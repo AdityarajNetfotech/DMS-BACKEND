@@ -183,8 +183,14 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
 
 const getFolderTree = async (req) => {
   const tenantId = req.user.companySlug;
-  const deptFilter = req.user.departmentId || null;
-  const folders = await req.Folder.find({ tenantId, isDeleted: false, departmentId: deptFilter }).lean();
+  const userId = req.user.userId;
+  const userRole = req.user.role;
+
+  const query = { tenantId, isDeleted: false };
+  if (userRole !== 'Tenant Admin') {
+    query.createdBy = userId;
+  }
+  const folders = await req.Folder.find(query).lean();
 
   const folderMap = {};
   folders.forEach(f => {
@@ -218,7 +224,7 @@ const softDeleteFolder = async (req, folderId) => {
 
   const query = { _id: folderId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.createdBy = userId;
   }
   const folder = await Folder.findOne(query);
   if (!folder) throw new Error('Folder not found');
@@ -253,10 +259,11 @@ const restoreFolder = async (req, folderId) => {
   const Folder = req.Folder;
   const Trash = req.Trash;
   const tenantId = req.user.companySlug;
+  const userId = req.user.userId;
 
   const query = { _id: folderId, tenantId, isDeleted: true };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.createdBy = userId;
   }
   const folder = await Folder.findOne(query);
   if (!folder) throw new Error('Folder not found in Trash');

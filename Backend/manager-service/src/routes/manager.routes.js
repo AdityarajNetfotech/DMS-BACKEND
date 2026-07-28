@@ -32,32 +32,64 @@ router.post(
   upload.single('file'),
   async (req, res, next) => {
     try {
+      if (req.isAccessLocked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your subscription has expired. Please upgrade or renew your plan to continue uploading files.'
+        });
+      }
       const userRole = req.user.role;
-      // Managers and Admins can upload to any folder
-      if (userRole === 'Manager' || userRole === 'Tenant Admin') {
+      const userId = req.user.userId;
+      const tenantId = req.user.companySlug;
+      const { folderId } = req.body;
+
+      // Allow Tenant Admin to upload anywhere
+      if (userRole === 'Tenant Admin') {
         return next();
       }
 
-      // Viewers must specify a folderId
-      const { folderId } = req.body;
+      // If folderId is not provided, only Manager can upload (Viewer cannot upload to root)
       if (!folderId) {
+        if (userRole === 'Manager') {
+          return next();
+        }
         return res.status(403).json({ success: false, message: 'Viewers can only upload to shared folders. Please provide a folder ID.' });
       }
 
-      // Check if folder is shared with the viewer and has uploadAllowed: true
+      const Folder = req.Folder;
       const Share = req.Share;
-      const userId = req.user.userId;
-      const tenantId = req.user.companySlug;
 
-      const share = await Share.findOne({
-        tenantId,
-        folderId,
-        sharingType: 'Internal',
-        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId),
-        'permissions.uploadAllowed': true
-      });
+      // Helper to check recursively if user has upload permission
+      const checkUploadPermission = async (targetId) => {
+        let currentId = targetId;
+        while (currentId) {
+          const folder = await Folder.findOne({ _id: currentId, tenantId, isDeleted: false });
+          if (!folder) return false;
+          
+          if (folder.createdBy?.toString() === userId || folder.createdBy?._id?.toString() === userId) {
+            return true;
+          }
+          
+          const share = await Share.findOne({
+            tenantId,
+            folderId: currentId,
+            sharingType: 'Internal',
+            $or: [
+              { sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId) },
+              { sharedWithViewers: { $exists: true, $size: 0 } },
+              { sharedWithViewers: { $exists: false } }
+            ],
+            'permissions.uploadAllowed': true
+          });
+          if (share) return true;
+          
+          currentId = folder.parentFolder;
+        }
+        return false;
+      };
 
-      if (!share) {
+      const hasPermission = await checkUploadPermission(folderId);
+      if (!hasPermission) {
         return res.status(403).json({ success: false, message: 'You do not have permission to upload files to this folder.' });
       }
 
@@ -107,6 +139,7 @@ router.delete('/documents/:id', documentController.softDeleteDocument);
 router.post('/documents/:id/copy', documentController.copyDocument);
 router.post('/documents/:id/move', documentController.moveDocument);
 router.get('/documents/:id/versions', documentController.getVersionHistory);
+router.post('/documents/:id/versions/:versionId/restore', documentController.restoreDocumentVersion);
 router.post('/documents/:id/convert', documentController.convertDocument);
 
 // Trash

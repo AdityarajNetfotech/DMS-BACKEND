@@ -57,20 +57,56 @@ const calculateFolderSize = async (folderId, Folder, Document, tenantId) => {
   return size;
 };
 
+const isFolderAccessible = async (folder, userId, tenantId, Folder, Share) => {
+  // If user is owner
+  if (folder.createdBy?.toString() === userId || folder.createdBy?._id?.toString() === userId) {
+    return { accessible: true, uploadAllowed: true };
+  }
+
+  // Check if there is a direct share for this folder
+  const share = await Share.findOne({
+    tenantId,
+    folderId: folder._id,
+    sharingType: 'Internal',
+    $or: [
+      { sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId) },
+      { sharedWithViewers: { $exists: true, $size: 0 } },
+      { sharedWithViewers: { $exists: false } }
+    ]
+  });
+
+  if (share) {
+    return { accessible: true, uploadAllowed: share.permissions?.uploadAllowed === true };
+  }
+
+  // If this folder has a parent folder, check the parent folder recursively
+  if (folder.parentFolder) {
+    const parent = await Folder.findOne({ _id: folder.parentFolder, tenantId, isDeleted: false });
+    if (parent) {
+      return await isFolderAccessible(parent, userId, tenantId, Folder, Share);
+    }
+  }
+
+  return { accessible: false, uploadAllowed: false };
+};
+
 const getFolderDetails = async (req, res, next) => {
   try {
     const Folder = req.Folder;
     const Document = req.Document;
+    const Share = req.Share;
     const tenantId = req.user.companySlug;
-
-    const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
+    const userId = req.user.userId;
+    const userRole = req.user.role;
 
     if (req.params.id === 'root') {
       const folderQuery = { parentFolder: null, tenantId, isDeleted: false };
-      if (deptFilter !== undefined) folderQuery.departmentId = deptFilter;
-
       const docQuery = { folderId: null, tenantId, isDeleted: false };
-      if (deptFilter !== undefined) docQuery.departmentId = deptFilter;
+
+      if (userRole !== 'Tenant Admin') {
+        folderQuery.createdBy = userId;
+        docQuery.uploadedBy = userId;
+      }
 
       const childFolders = await Folder.find(folderQuery)
         .populate('createdBy', 'name')
@@ -101,12 +137,21 @@ const getFolderDetails = async (req, res, next) => {
     }
 
     const folderQuery = { _id: req.params.id, tenantId, isDeleted: false };
-    if (deptFilter !== undefined) folderQuery.departmentId = deptFilter;
-
     const folder = await Folder.findOne(folderQuery)
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');
     if (!folder) return res.status(404).json({ success: false, message: 'Folder not found' });
+
+    let uploadAllowed = false;
+    if (userRole === 'Tenant Admin') {
+      uploadAllowed = true;
+    } else {
+      const accessResult = await isFolderAccessible(folder, userId, tenantId, Folder, Share);
+      if (!accessResult.accessible) {
+        return res.status(403).json({ success: false, message: 'Access denied: You do not have permission to view this folder.' });
+      }
+      uploadAllowed = accessResult.uploadAllowed;
+    }
 
     const childFolders = await Folder.find({ parentFolder: folder._id, tenantId, isDeleted: false })
       .populate('createdBy', 'name')
@@ -128,7 +173,10 @@ const getFolderDetails = async (req, res, next) => {
       success: true,
       message: 'Folder details retrieved successfully.',
       data: {
-        folder,
+        folder: {
+          ...folder.toObject(),
+          uploadAllowed
+        },
         childFolders: childFoldersWithSizes,
         documents
       },

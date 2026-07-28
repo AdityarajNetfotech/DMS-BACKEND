@@ -38,7 +38,8 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
       fileName: document.originalFileName,
       fileSize: document.fileSize,
       storageUrl: document.storageUrl,
-      uploadedBy: document.uploadedBy
+      uploadedBy: document.uploadedBy,
+      comment: document.description || 'Backup version'
     });
     await versionHistory.save();
 
@@ -100,7 +101,7 @@ const updateDocumentDetails = async (req, docId, name, description, tags) => {
 
   const query = { _id: docId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -122,7 +123,7 @@ const toggleLockDocument = async (req, docId, isLocked) => {
 
   const query = { _id: docId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -143,7 +144,7 @@ const toggleArchiveDocument = async (req, docId, isArchived) => {
 
   const query = { _id: docId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -168,7 +169,7 @@ const toggleFavoriteDocument = async (req, docId, isFavorite) => {
 
   const query = { _id: docId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -196,7 +197,7 @@ const softDeleteDocument = async (req, docId) => {
 
   const query = { _id: docId, tenantId, isDeleted: false };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -231,7 +232,7 @@ const restoreDocument = async (req, docId) => {
 
   const query = { _id: docId, tenantId, isDeleted: true };
   if (req.user.role !== 'Tenant Admin') {
-    query.departmentId = req.user.departmentId || null;
+    query.uploadedBy = req.user.userId;
   }
 
   const doc = await Document.findOne(query);
@@ -736,6 +737,47 @@ ${originalText}`;
   return convertedDoc;
 };
 
+const restoreVersion = async (req, docId, versionId) => {
+  const Document = req.Document;
+  const Version = req.Version;
+  const tenantId = req.user.companySlug;
+  const userId = req.user.userId;
+
+  const doc = await Document.findOne({ _id: docId, tenantId, isDeleted: false });
+  if (!doc) throw new Error('Document not found');
+
+  if (doc.isLocked) {
+    throw new Error('Document is locked and cannot be restored.');
+  }
+
+  const oldVersion = await Version.findOne({ _id: versionId, documentId: docId, tenantId });
+  if (!oldVersion) throw new Error('Historical version not found');
+
+  const currentVersionBackup = new Version({
+    tenantId,
+    documentId: doc._id,
+    versionNumber: doc.versionNumber,
+    fileName: doc.originalFileName,
+    fileSize: doc.fileSize,
+    storageUrl: doc.storageUrl,
+    uploadedBy: doc.uploadedBy,
+    comment: `Before restoring to version v${oldVersion.versionNumber}.0`
+  });
+  await currentVersionBackup.save();
+
+  doc.versionNumber += 1;
+  doc.originalFileName = oldVersion.fileName;
+  doc.fileSize = oldVersion.fileSize;
+  doc.storageUrl = oldVersion.storageUrl;
+  doc.uploadedBy = userId;
+  doc.description = `Restored to version v${oldVersion.versionNumber}.0`;
+  
+  await doc.save();
+
+  await activityService.logActivity(req, 'Document Version Restored', 'Document', doc._id);
+  return doc;
+};
+
 module.exports = {
   uploadDocument,
   updateDocumentDetails,
@@ -747,5 +789,6 @@ module.exports = {
   permanentlyDeleteDocument,
   copyDocument,
   moveDocument,
-  convertDocument
+  convertDocument,
+  restoreVersion
 };

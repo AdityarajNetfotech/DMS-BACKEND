@@ -6,25 +6,30 @@ const getDashboardStats = async (req, res, next) => {
     const userId = req.user.userId;
 
     const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
-    const filter = { tenantId, isDeleted: false };
-    const deletedFilter = { tenantId, isDeleted: true };
-    if (deptFilter !== undefined) {
-      filter.departmentId = deptFilter;
-      deletedFilter.departmentId = deptFilter;
+    const docFilter = { tenantId, isDeleted: false };
+    const folderFilter = { tenantId, isDeleted: false };
+    const deletedDocFilter = { tenantId, isDeleted: true };
+    const deletedFolderFilter = { tenantId, isDeleted: true };
+
+    if (req.user.role !== 'Tenant Admin') {
+      docFilter.uploadedBy = userId;
+      folderFilter.createdBy = userId;
+      deletedDocFilter.uploadedBy = userId;
+      deletedFolderFilter.createdBy = userId;
     }
 
-    const totalDocs = await req.Document.countDocuments(filter);
-    const totalFolders = await req.Folder.countDocuments(filter);
-    const totalDeletedDocs = await req.Document.countDocuments(deletedFilter);
-    const totalDeletedFolders = await req.Folder.countDocuments(deletedFilter);
+    const totalDocs = await req.Document.countDocuments(docFilter);
+    const totalFolders = await req.Folder.countDocuments(folderFilter);
+    const totalDeletedDocs = await req.Document.countDocuments(deletedDocFilter);
+    const totalDeletedFolders = await req.Folder.countDocuments(deletedFolderFilter);
 
-    const recentDocs = await req.Document.find(filter)
+    const recentDocs = await req.Document.find(docFilter)
       .sort({ createdAt: -1 })
-      .limit(5)
+      .limit(7)
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 
-    const recentModifiedDocs = await req.Document.find(filter)
+    const recentModifiedDocs = await req.Document.find(docFilter)
       .sort({ updatedAt: -1 })
       .limit(5)
       .populate('uploadedBy', 'name')
@@ -34,12 +39,23 @@ const getDashboardStats = async (req, res, next) => {
 
     const storageStats = await storageService.getStorageUsage(req);
 
-    const recentActivities = await req.ActivityLog.find({ tenantId })
+    const activityQuery = { tenantId };
+    if (req.user.role !== 'Tenant Admin') {
+      activityQuery.userId = userId;
+    }
+    const recentActivities = await req.ActivityLog.find(activityQuery)
       .sort({ createdAt: -1 })
       .limit(10);
 
     // Count shared items
-    const sharedCount = await req.Share.countDocuments({ tenantId });
+    const shareQuery = { tenantId };
+    if (req.user.role !== 'Tenant Admin') {
+      shareQuery.$or = [
+        { sharedBy: userId },
+        { sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId) }
+      ];
+    }
+    const sharedCount = await req.Share.countDocuments(shareQuery);
 
     // Get recent uploads (last 7 days)
     const sevenDaysAgo = new Date();
@@ -49,7 +65,9 @@ const getDashboardStats = async (req, res, next) => {
       isDeleted: false,
       createdAt: { $gte: sevenDaysAgo }
     };
-    if (deptFilter !== undefined) uploadQuery.departmentId = deptFilter;
+    if (req.user.role !== 'Tenant Admin') {
+      uploadQuery.uploadedBy = userId;
+    }
 
     const recentUploadsCount = await req.Document.countDocuments(uploadQuery);
 
@@ -76,16 +94,21 @@ const getDashboardStats = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .limit(5);
 
+    const matchQuery = { tenantId, isDeleted: false };
+    if (req.user.role !== 'Tenant Admin') {
+      matchQuery.uploadedBy = new (require('mongoose').Types.ObjectId)(userId);
+    }
+
     // Get document type breakdown for storage overview
     const docTypeBreakdown = await req.Document.aggregate([
-      { $match: { tenantId, isDeleted: false } },
+      { $match: matchQuery },
       { $group: { _id: '$fileType', count: { $sum: 1 }, totalSize: { $sum: '$fileSize' } } },
       { $sort: { count: -1 } }
     ]);
 
     // Department storage breakdown
     const departmentBreakdown = await req.Document.aggregate([
-      { $match: { tenantId, isDeleted: false } },
+      { $match: matchQuery },
       { $group: { _id: '$departmentId', totalSize: { $sum: '$fileSize' } } },
       { $sort: { totalSize: -1 } },
       { $limit: 5 }
@@ -106,7 +129,7 @@ const getDashboardStats = async (req, res, next) => {
 
     // Top users by storage consumption
     const topUsersBreakdown = await req.Document.aggregate([
-      { $match: { tenantId, isDeleted: false } },
+      { $match: matchQuery },
       { $group: { _id: '$uploadedBy', totalSize: { $sum: '$fileSize' }, count: { $sum: 1 } } },
       { $sort: { totalSize: -1 } },
       { $limit: 5 }
@@ -167,7 +190,7 @@ const getManagerActivityReport = async (req, res, next) => {
       managers.map(async (m) => {
         const folderCount = await req.Folder.countDocuments({ createdBy: m._id, tenantId, isDeleted: false });
         const fileCount = await req.Document.countDocuments({ uploadedBy: m._id, tenantId, isDeleted: false });
-        
+
         return {
           id: m._id,
           name: m.name,

@@ -5,14 +5,17 @@ const getTrashList = async (req, res, next) => {
   try {
     const tenantId = req.user.companySlug;
 
-    const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
-    const query = { tenantId, isDeleted: true };
-    if (deptFilter !== undefined) query.departmentId = deptFilter;
+    const folderQuery = { tenantId, isDeleted: true };
+    const docQuery = { tenantId, isDeleted: true };
+    if (req.user.role !== 'Tenant Admin') {
+      folderQuery.createdBy = req.user.userId;
+      docQuery.uploadedBy = req.user.userId;
+    }
 
-    const folders = await req.Folder.find(query)
+    const folders = await req.Folder.find(folderQuery)
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');
-    const documents = await req.Document.find(query)
+    const documents = await req.Document.find(docQuery)
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 
@@ -78,10 +81,11 @@ const permanentlyDeleteResource = async (req, res, next) => {
 
 const emptyTrash = async (req, res, next) => {
   try {
-    const Trash = req.Trash;
-    const tenantId = req.user.companySlug;
-
-    const trashItems = await Trash.find({ tenantId });
+    const query = { tenantId };
+    if (req.user.role !== 'Tenant Admin') {
+      query.deletedBy = req.user.userId;
+    }
+    const trashItems = await Trash.find(query);
 
     for (const item of trashItems) {
       if (item.resourceType === 'Folder') {

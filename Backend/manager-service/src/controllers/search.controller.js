@@ -33,10 +33,10 @@ const globalSearch = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     // Build query filters for Document
-    const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
-
     const docFilter = { tenantId, isDeleted: false };
-    if (deptFilter !== undefined) docFilter.departmentId = deptFilter;
+    if (req.user.role !== 'Tenant Admin') {
+      docFilter.uploadedBy = req.user.userId;
+    }
     
     if (query) {
       docFilter.$or = [
@@ -81,7 +81,9 @@ const globalSearch = async (req, res, next) => {
 
     // Build query filters for Folder
     const folderFilter = { tenantId, isDeleted: false };
-    if (deptFilter !== undefined) folderFilter.departmentId = deptFilter;
+    if (req.user.role !== 'Tenant Admin') {
+      folderFilter.createdBy = req.user.userId;
+    }
     if (query) {
       folderFilter.$or = [
         { name: { $regex: query, $options: 'i' } },

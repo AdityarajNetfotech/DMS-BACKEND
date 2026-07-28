@@ -29,6 +29,10 @@ const versionSchema = new mongoose.Schema({
   uploadedBy: {
     type: String,
     required: true,
+  },
+  comment: {
+    type: String,
+    default: '',
   }
 }, { timestamps: true });
 

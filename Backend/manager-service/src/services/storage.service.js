@@ -1,5 +1,15 @@
 const logger = require('../config/logger');
 
+const getStorageLimitByPlan = (plan) => {
+  switch (plan) {
+    case 'Trial': return 500 * 1024 * 1024; // 500 MB
+    case 'Basic': return 5 * 1024 * 1024 * 1024; // 5 GB
+    case 'Pro': return 25 * 1024 * 1024 * 1024; // 25 GB
+    case 'Ultra': return 500 * 1024 * 1024 * 1024; // 500 GB
+    default: return 500 * 1024 * 1024; // fallback to Trial
+  }
+};
+
 const checkAndIncrementStorage = async (req, fileSize) => {
   const Storage = req.Storage;
   const Notification = req.Notification;
@@ -10,12 +20,16 @@ const checkAndIncrementStorage = async (req, fileSize) => {
   let storage = await Storage.findOne({ tenantId });
   if (!storage) {
     storage = new Storage({ tenantId });
-    await storage.save();
   }
+
+  // Update storage limit dynamically based on plan
+  const plan = req.tenant?.subscription?.plan || 'Trial';
+  storage.maxStorageLimit = getStorageLimitByPlan(plan);
+  await storage.save();
 
   const newUsed = storage.totalStorageUsed + fileSize;
   if (newUsed > storage.maxStorageLimit) {
-    throw new Error('Storage limit exceeded. Cannot upload file.');
+    throw new Error(`Storage limit exceeded. Your plan limit is ${plan === 'Trial' ? '500 MB' : plan === 'Basic' ? '5 GB' : plan === 'Pro' ? '25 GB' : '500 GB'}.`);
   }
 
   // Update storage limit count
@@ -69,8 +83,11 @@ const getStorageUsage = async (req) => {
   let storage = await Storage.findOne({ tenantId });
   if (!storage) {
     storage = new Storage({ tenantId });
-    await storage.save();
   }
+
+  const plan = req.tenant?.subscription?.plan || 'Trial';
+  storage.maxStorageLimit = getStorageLimitByPlan(plan);
+  await storage.save();
 
   return {
     totalStorageUsed: storage.totalStorageUsed,

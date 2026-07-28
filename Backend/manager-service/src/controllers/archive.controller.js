@@ -1,14 +1,17 @@
 const getArchivedItems = async (req, res, next) => {
   try {
     const tenantId = req.user.companySlug;
-    const deptFilter = req.user.role === 'Tenant Admin' ? undefined : (req.user.departmentId || null);
-    const query = { tenantId, isArchived: true, isDeleted: false };
-    if (deptFilter !== undefined) query.departmentId = deptFilter;
+    const folderQuery = { tenantId, isArchived: true, isDeleted: false };
+    const docQuery = { tenantId, isArchived: true, isDeleted: false };
+    if (req.user.role !== 'Tenant Admin') {
+      folderQuery.createdBy = req.user.userId;
+      docQuery.uploadedBy = req.user.userId;
+    }
 
-    const folders = await req.Folder.find(query)
+    const folders = await req.Folder.find(folderQuery)
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');
-    const documents = await req.Document.find(query)
+    const documents = await req.Document.find(docQuery)
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 

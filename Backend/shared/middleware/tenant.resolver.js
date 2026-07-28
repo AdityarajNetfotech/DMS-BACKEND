@@ -35,8 +35,24 @@ const tenantResolver = async (req, res, next) => {
     req.tenantDb = tenantDbConnection;
     req.User = tenantDbConnection.model('User');
     req.Department = tenantDbConnection.model('Department');
+
+    // Compute isAccessLocked based on Trial expiration or plan expiration
+    const regDate = tenant.registrationDate || tenant.createdAt;
+    const trialEndsAt = regDate ? new Date(new Date(regDate).getTime() + 7 * 24 * 60 * 60 * 1000) : tenant.trialEndsAt;
+
+    const now = new Date();
+    const trialEnded = trialEndsAt && new Date(trialEndsAt) < now;
+    const planExpired = tenant.subscription?.expiresAt && new Date(tenant.subscription.expiresAt) < now;
+
+    let isAccessLocked = false;
+    if (tenant.subscription?.plan === 'Trial' && trialEnded) {
+      isAccessLocked = true;
+    } else if (tenant.subscription?.plan !== 'Trial' && planExpired) {
+      isAccessLocked = true;
+    }
+    req.isAccessLocked = isAccessLocked;
     
-    console.log(`[tenantResolver] successfully resolved tenant: ${companySlug}, calling next()`);
+    console.log(`[tenantResolver] successfully resolved tenant: ${companySlug}, isAccessLocked: ${isAccessLocked}, calling next()`);
     next();
   } catch (error) {
     console.error('Tenant Resolver Error:', error);

@@ -241,10 +241,20 @@ const downloadSharedFile = async (req, res, next) => {
 const getSharedItems = async (req, res, next) => {
   try {
     const tenantId = req.user.companySlug;
+    const userId = req.user.userId;
+    const userRole = req.user.role;
     const Share = req.Share;
 
+    const query = { tenantId };
+    if (userRole !== 'Tenant Admin') {
+      query.$or = [
+        { sharedBy: userId },
+        { sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId) }
+      ];
+    }
+
     // Ensure User model is available for populate (registered by tenantResolver)
-    const shares = await Share.find({ tenantId })
+    const shares = await Share.find(query)
       .populate('documentId', 'originalFileName fileType fileSize name storageUrl')
       .populate('folderId', 'name')
       .populate({ path: 'sharedBy', model: req.User, select: 'name email' })

@@ -1,11 +1,63 @@
 const aiHelper = require('../helpers/ai.helper');
 
+const checkAndIncrementAiUsage = async (req) => {
+  const tenant = req.tenant;
+  if (!tenant) {
+    throw new Error('Tenant context not found');
+  }
+
+  // Ensure AI usage object exists
+  if (!tenant.aiUsage) {
+    tenant.aiUsage = { count: 0, resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
+  }
+
+  // Check if resetDate has passed, reset count if so
+  const now = new Date();
+  if (tenant.aiUsage.resetDate && new Date(tenant.aiUsage.resetDate) < now) {
+    tenant.aiUsage.count = 0;
+    tenant.aiUsage.resetDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  }
+
+  const plan = tenant.subscription?.plan || 'Trial';
+  let limit = 5; // default for Trial
+  if (plan === 'Basic') {
+    limit = 0;
+  } else if (plan === 'Pro') {
+    limit = 100;
+  } else if (plan === 'Ultra') {
+    limit = Infinity;
+  }
+
+  if (tenant.aiUsage.count >= limit) {
+    if (plan === 'Basic') {
+      throw new Error('AI capabilities are not included in your Basic plan. Please upgrade to Pro or Ultra.');
+    } else {
+      throw new Error(`AI query limit reached for your ${plan === 'Trial' ? 'Trial' : plan} subscription plan.`);
+    }
+  }
+
+  tenant.aiUsage.count += 1;
+  await tenant.save();
+};
+
 const summarizeDocument = async (req, res, next) => {
   try {
+    if (req.isAccessLocked) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your subscription has expired. Please upgrade or renew your plan to continue using AI features.'
+      });
+    }
+
+    try {
+      await checkAndIncrementAiUsage(req);
+    } catch (limitErr) {
+      return res.status(403).json({ success: false, message: limitErr.message });
+    }
+
     const Document = req.Document;
     const tenantId = req.user.companySlug;
     const docId = req.params.id;
-
     const doc = await Document.findOne({ _id: docId, tenantId, isDeleted: false });
     if (!doc) {
       return res.status(404).json({ success: false, message: 'Document not found' });
@@ -47,6 +99,19 @@ const summarizeDocument = async (req, res, next) => {
 
 const summarizeFolder = async (req, res, next) => {
   try {
+    if (req.isAccessLocked) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your subscription has expired. Please upgrade or renew your plan to continue using AI features.'
+      });
+    }
+
+    try {
+      await checkAndIncrementAiUsage(req);
+    } catch (limitErr) {
+      return res.status(403).json({ success: false, message: limitErr.message });
+    }
+
     const Folder = req.Folder;
     const Document = req.Document;
     const tenantId = req.user.companySlug;

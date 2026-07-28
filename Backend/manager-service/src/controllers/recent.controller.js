@@ -17,13 +17,15 @@ const getRecentItems = async (req, res, next) => {
     const Document = req.Document;
     const tenantId = req.user.companySlug;
 
-    const query = { tenantId, isDeleted: false };
+    const folderQuery = { tenantId, isDeleted: false };
+    const docQuery = { tenantId, isDeleted: false };
     if (req.user.role !== 'Tenant Admin') {
-      query.departmentId = req.user.departmentId || null;
+      folderQuery.createdBy = req.user.userId;
+      docQuery.uploadedBy = req.user.userId;
     }
 
     // Fetch latest 10 folders
-    const folders = await Folder.find(query)
+    const folders = await Folder.find(folderQuery)
       .sort({ createdAt: -1 })
       .limit(10)
       .populate('createdBy', 'name')
@@ -31,7 +33,7 @@ const getRecentItems = async (req, res, next) => {
       .lean();
 
     // Fetch latest 10 documents
-    const documents = await Document.find(query)
+    const documents = await Document.find(docQuery)
       .sort({ createdAt: -1 })
       .limit(10)
       .populate('uploadedBy', 'name')
