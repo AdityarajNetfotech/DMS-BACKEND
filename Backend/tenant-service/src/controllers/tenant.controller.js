@@ -60,6 +60,26 @@ const createTenant = async (req, res, next) => {
       });
     }
 
+    if (gstNumber) {
+      const existingGst = await Tenant.findOne({ gstNumber: gstNumber.trim() });
+      if (existingGst) {
+        return res.status(400).json({
+          success: false,
+          message: 'A tenant with this GST number already exists',
+        });
+      }
+    }
+
+    if (panNumber) {
+      const existingPan = await Tenant.findOne({ panNumber: panNumber.trim() });
+      if (existingPan) {
+        return res.status(400).json({
+          success: false,
+          message: 'A tenant with this PAN number already exists',
+        });
+      }
+    }
+
     // Build tenant database URI
     const basePath = process.env.MONGO_MASTER_URI.substring(
       0,
@@ -208,6 +228,32 @@ const updateTenant = async (req, res, next) => {
     }
     if (req.body.registrationDate !== undefined) {
       updates.trialEndsAt = new Date(new Date(req.body.registrationDate).getTime() + 7 * 24 * 60 * 60 * 1000);
+    }
+
+    if (req.body.gstNumber !== undefined) {
+      const existingGst = await Tenant.findOne({
+        gstNumber: req.body.gstNumber.trim(),
+        _id: { $ne: req.params.id }
+      });
+      if (existingGst) {
+        return res.status(400).json({
+          success: false,
+          message: 'A tenant with this GST number already exists',
+        });
+      }
+    }
+
+    if (req.body.panNumber !== undefined) {
+      const existingPan = await Tenant.findOne({
+        panNumber: req.body.panNumber.trim(),
+        _id: { $ne: req.params.id }
+      });
+      if (existingPan) {
+        return res.status(400).json({
+          success: false,
+          message: 'A tenant with this PAN number already exists',
+        });
+      }
     }
 
     const tenant = await Tenant.findByIdAndUpdate(req.params.id, updates, {

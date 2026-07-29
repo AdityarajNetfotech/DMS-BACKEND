@@ -92,6 +92,27 @@ router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, nex
     if (req.user.role === 'Manager' && role !== 'Viewer') {
       return res.status(403).json({ success: false, message: 'Forbidden: Managers can only create Viewers' });
     }
+
+    if (email) {
+      const emailLower = email.trim().toLowerCase();
+      const domain = emailLower.split("@")[1] || "";
+      
+      const genericDomains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "aol.com", "icloud.com"];
+      if (genericDomains.includes(domain)) {
+        return res.status(400).json({
+          success: false,
+          message: "Generic email domains (like gmail.com) are not allowed. Please use your company domain."
+        });
+      }
+
+      const companyNameSanitized = req.tenant.companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (companyNameSanitized && !domain.includes(companyNameSanitized)) {
+        return res.status(400).json({
+          success: false,
+          message: `Email domain must contain the company name (e.g. name@${companyNameSanitized}.com or name@${companyNameSanitized}.in).`
+        });
+      }
+    }
     
     const tempPassword = password || crypto.randomBytes(8).toString('hex');
     const user = new req.User({ name, email, role, password: tempPassword, departmentId: departmentId || null });
@@ -133,7 +154,27 @@ router.put('/:id', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, n
     }
 
     if (name) userToUpdate.name = name;
-    if (email) userToUpdate.email = email;
+    if (email) {
+      const emailLower = email.trim().toLowerCase();
+      const domain = emailLower.split("@")[1] || "";
+      
+      const genericDomains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "aol.com", "icloud.com"];
+      if (genericDomains.includes(domain)) {
+        return res.status(400).json({
+          success: false,
+          message: "Generic email domains (like gmail.com) are not allowed. Please use your company domain."
+        });
+      }
+
+      const companyNameSanitized = req.tenant.companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (companyNameSanitized && !domain.includes(companyNameSanitized)) {
+        return res.status(400).json({
+          success: false,
+          message: `Email domain must contain the company name (e.g. name@${companyNameSanitized}.com or name@${companyNameSanitized}.in).`
+        });
+      }
+      userToUpdate.email = email;
+    }
     if (role) userToUpdate.role = role;
     if (status) userToUpdate.status = status;
     if (req.body.departmentId !== undefined) {
