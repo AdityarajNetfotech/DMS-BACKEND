@@ -8,6 +8,53 @@ const storageHelper = require('../helpers/storage.helper');
 const storageService = require('./storage.service');
 const activityService = require('./activity.service');
 
+const extractTextFromFile = async (filePath, ext) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return '';
+    }
+    const rawBuffer = fs.readFileSync(filePath);
+    const fileTypeUpper = ext.replace('.', '').toUpperCase();
+
+    if (fileTypeUpper === 'PDF') {
+      try {
+        const pdfData = await pdfParse(rawBuffer);
+        return pdfData.text || '';
+      } catch (err) {
+        console.error('PDF parsing failed:', err);
+        return '';
+      }
+    } else if (fileTypeUpper === 'DOCX') {
+      try {
+        const docxData = await mammoth.extractRawText({ buffer: rawBuffer });
+        return docxData.value || '';
+      } catch (err) {
+        console.error('DOCX parsing failed:', err);
+        return '';
+      }
+    } else if (['XLSX', 'PPTX'].includes(fileTypeUpper)) {
+      const matches = rawBuffer.toString('binary').match(/[ -~]{4,}/g);
+      if (matches) {
+        return matches
+          .filter(str => {
+            if (/^[0-9a-fA-F]{8,}$/.test(str)) return false;
+            if (str.includes('<?xml') || str.includes('<Relationship') || str.includes('schema')) return false;
+            return true;
+          })
+          .slice(0, 500)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .substring(0, 10000);
+      }
+    } else if (['TXT', 'CSV', 'JSON'].includes(fileTypeUpper)) {
+      return rawBuffer.toString('utf8');
+    }
+  } catch (error) {
+    console.error('Text extraction failed:', error);
+  }
+  return '';
+};
+
 const uploadDocument = async (req, folderId, file, name, description, tags = []) => {
   const Document = req.Document;
   const Folder = req.Folder;
@@ -43,6 +90,12 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
     });
     await versionHistory.save();
 
+    // Extract text from the new file before it gets uploaded/moved
+    let extractedText = '';
+    if (file && file.path) {
+      extractedText = await extractTextFromFile(file.path, ext);
+    }
+
     // Upload the new file asset
     const uploadResult = await storageHelper.uploadToStorage(file);
 
@@ -52,6 +105,7 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
     document.fileSize = file.size;
     document.storageUrl = uploadResult.url;
     document.uploadedBy = userId;
+    document.extractedText = extractedText;
     if (description) document.description = description;
     if (tags && tags.length > 0) document.tags = tags;
     
@@ -62,6 +116,12 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
   } else {
     // Check storage limits
     await storageService.checkAndIncrementStorage(req, file.size);
+
+    // Extract text from the new file before it gets uploaded/moved
+    let extractedText = '';
+    if (file && file.path) {
+      extractedText = await extractTextFromFile(file.path, ext);
+    }
 
     // Upload the file asset
     const uploadResult = await storageHelper.uploadToStorage(file);
@@ -80,6 +140,7 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
       storageUrl: uploadResult.url,
       description,
       tags,
+      extractedText,
       departmentId: req.user.departmentId || null
     });
 
@@ -724,6 +785,7 @@ ${originalText}`;
     storageUrl: uploadResult.url,
     description: `Converted from ${doc.originalFileName} to ${targetFormat}`,
     tags: [...doc.tags, 'converted'],
+    extractedText: originalText,
     departmentId: doc.departmentId
   });
 

@@ -159,6 +159,7 @@ router.get('/storage/folder/:folderId', storageController.getFolderSize);
 
 // Search
 router.get('/search', searchController.globalSearch);
+router.get('/search/document-ids', searchController.listDocumentIds);
 
 // Archive
 router.get('/archive', archiveController.getArchivedItems);
