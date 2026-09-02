@@ -193,6 +193,21 @@ const globalSearch = async (req, res, next) => {
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 
+    // Build content snippet for each document (shows where in the text the query matched)
+    const documentsWithSnippet = documents.map(doc => {
+      const plain = doc.toObject ? doc.toObject() : { ...doc };
+      if (query && plain.extractedText) {
+        const text = plain.extractedText;
+        const idx = text.toLowerCase().indexOf(query.toLowerCase());
+        if (idx !== -1) {
+          const start = Math.max(0, idx - 80);
+          const end = Math.min(text.length, idx + query.length + 120);
+          plain.contentSnippet = (start > 0 ? '...' : '') + text.slice(start, end) + (end < text.length ? '...' : '');
+        }
+      }
+      return plain;
+    });
+
     // Retrieve matching folders if not strictly looking for specific file attributes
     let folders = [];
     if (!fileType && isFavorite !== 'true' && isArchived !== 'true' && isLocked !== 'true') {
@@ -214,7 +229,7 @@ const globalSearch = async (req, res, next) => {
       success: true,
       message: 'Global search completed successfully.',
       data: {
-        documents,
+        documents: documentsWithSnippet,
         folders,
         pagination: {
           page: Number(page),

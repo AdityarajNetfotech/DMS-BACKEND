@@ -128,6 +128,7 @@ router.post('/folders/:id/summarize', aiController.summarizeFolder);
 
 // Documents
 router.post('/documents/:id/summarize', aiController.summarizeDocument);
+router.post('/documents/backfill-text', documentController.backfillExtractedText);
 router.get('/documents/:id', documentController.getDocumentDetails);
 router.get('/documents/:id/download', documentController.downloadDocument);
 router.get('/documents/:id/preview', documentController.previewDocument);
@@ -141,6 +142,7 @@ router.post('/documents/:id/move', documentController.moveDocument);
 router.get('/documents/:id/versions', documentController.getVersionHistory);
 router.post('/documents/:id/versions/:versionId/restore', documentController.restoreDocumentVersion);
 router.post('/documents/:id/convert', documentController.convertDocument);
+router.post('/documents/:id/re-extract', documentController.reExtractDocumentText);
 
 // Trash
 router.get('/trash', trashController.getTrashList);

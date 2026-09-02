@@ -840,6 +840,114 @@ const restoreVersion = async (req, docId, versionId) => {
   return doc;
 };
 
+/**
+ * Download a file from a remote URL into a temp file, returning the temp path.
+ */
+const downloadToTemp = (url) => {
+  return new Promise((resolve, reject) => {
+    const os = require('os');
+    const tmpFile = path.join(os.tmpdir(), `dms_reextract_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    const file = fs.createWriteStream(tmpFile);
+    const protocol = url.startsWith('https') ? require('https') : require('http');
+    protocol.get(url, (response) => {
+      response.pipe(file);
+      file.on('finish', () => file.close(() => resolve(tmpFile)));
+    }).on('error', (err) => {
+      fs.unlink(tmpFile, () => {});
+      reject(err);
+    });
+  });
+};
+
+/**
+ * Re-extract text for a single document and save it.
+ * Works for both local and Cloudinary-stored files.
+ */
+const reExtractTextForDocument = async (req, docId) => {
+  const Document = req.Document;
+  const tenantId = req.user.companySlug;
+
+  const doc = await Document.findOne({ _id: docId, tenantId, isDeleted: false });
+  if (!doc) throw new Error('Document not found');
+
+  const ext = doc.extension || path.extname(doc.originalFileName);
+
+  let extractedText = '';
+
+  if (doc.storageUrl.startsWith('/uploads')) {
+    // Local file
+    const filePath = path.join(__dirname, '../../', doc.storageUrl);
+    if (fs.existsSync(filePath)) {
+      extractedText = await extractTextFromFile(filePath, ext);
+    }
+  } else {
+    // Remote (Cloudinary) — download to temp, extract, then clean up
+    let tmpPath = null;
+    try {
+      tmpPath = await downloadToTemp(doc.storageUrl);
+      extractedText = await extractTextFromFile(tmpPath, ext);
+    } finally {
+      if (tmpPath && fs.existsSync(tmpPath)) {
+        fs.unlink(tmpPath, () => {});
+      }
+    }
+  }
+
+  doc.extractedText = extractedText;
+  await doc.save();
+  return { _id: doc._id, name: doc.name, extractedText: extractedText.substring(0, 200) };
+};
+
+/**
+ * Backfill extractedText for ALL documents that currently have no extracted text.
+ * Processes in batches to avoid memory issues.
+ */
+const backfillAllExtractedText = async (req) => {
+  const Document = req.Document;
+  const tenantId = req.user.companySlug;
+
+  const filter = { tenantId, isDeleted: false, $or: [{ extractedText: '' }, { extractedText: { $exists: false } }] };
+  const total = await Document.countDocuments(filter);
+  const docs = await Document.find(filter, '_id name originalFileName extension storageUrl').limit(100);
+
+  let processed = 0;
+  let failed = 0;
+  const results = [];
+
+  for (const doc of docs) {
+    try {
+      const ext = doc.extension || path.extname(doc.originalFileName);
+      let extractedText = '';
+
+      if (doc.storageUrl.startsWith('/uploads')) {
+        const filePath = path.join(__dirname, '../../', doc.storageUrl);
+        if (fs.existsSync(filePath)) {
+          extractedText = await extractTextFromFile(filePath, ext);
+        }
+      } else {
+        let tmpPath = null;
+        try {
+          tmpPath = await downloadToTemp(doc.storageUrl);
+          extractedText = await extractTextFromFile(tmpPath, ext);
+        } finally {
+          if (tmpPath && fs.existsSync(tmpPath)) {
+            fs.unlink(tmpPath, () => {});
+          }
+        }
+      }
+
+      await Document.updateOne({ _id: doc._id }, { $set: { extractedText } });
+      processed++;
+      results.push({ _id: doc._id, name: doc.name, status: 'ok', chars: extractedText.length });
+    } catch (err) {
+      failed++;
+      results.push({ _id: doc._id, name: doc.name, status: 'error', error: err.message });
+    }
+  }
+
+  return { total, processed, failed, results };
+};
+
 module.exports = {
   uploadDocument,
   updateDocumentDetails,
@@ -852,5 +960,7 @@ module.exports = {
   copyDocument,
   moveDocument,
   convertDocument,
-  restoreVersion
+  restoreVersion,
+  reExtractTextForDocument,
+  backfillAllExtractedText
 };

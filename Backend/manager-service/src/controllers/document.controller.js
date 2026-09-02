@@ -286,6 +286,40 @@ const restoreDocumentVersion = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * POST /documents/:id/re-extract
+ * Re-extracts and saves the text content of a single document.
+ * Useful for documents uploaded before full-text extraction was enabled.
+ */
+const reExtractDocumentText = async (req, res, next) => {
+  try {
+    const result = await documentService.reExtractTextForDocument(req, req.params.id);
+    res.status(200).json({
+      success: true,
+      message: 'Text re-extracted successfully.',
+      data: result,
+      errors: null
+    });
+  } catch (err) { next(err); }
+};
+
+/**
+ * POST /documents/backfill-text
+ * Backfills extractedText for all documents that have empty text (up to 100 at a time).
+ * Should be called by Tenant Admin to index existing documents for full-text search.
+ */
+const backfillExtractedText = async (req, res, next) => {
+  try {
+    const result = await documentService.backfillAllExtractedText(req);
+    res.status(200).json({
+      success: true,
+      message: `Backfill complete. Processed: ${result.processed}, Failed: ${result.failed}, Total pending: ${result.total}`,
+      data: result,
+      errors: null
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   uploadDocument,
   getDocumentDetails,
@@ -300,5 +334,7 @@ module.exports = {
   moveDocument,
   getVersionHistory,
   convertDocument,
-  restoreDocumentVersion
+  restoreDocumentVersion,
+  reExtractDocumentText,
+  backfillExtractedText
 };
