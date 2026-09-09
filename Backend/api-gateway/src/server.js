@@ -8,7 +8,13 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    frameguard: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false
+  })
+);
 app.use(cors());
 app.use(morgan('dev'));
 

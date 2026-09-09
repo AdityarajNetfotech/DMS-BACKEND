@@ -129,12 +129,26 @@ const createTenant = async (req, res, next) => {
     const tenantDb = await getTenantConnection(companySlug, tenantDbUri);
     const User = tenantDb.model('User', userSchema);
 
-    const tempPassword = adminPassword || crypto.randomBytes(8).toString('hex');
+    const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+    let tempPassword = adminPassword;
+    if (tempPassword) {
+      if (!PASSWORD_REGEX.test(tempPassword)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Admin password must be at least 8 characters long and contain uppercase, lowercase, number, and special character.'
+        });
+      }
+    } else {
+      const randHex = crypto.randomBytes(4).toString('hex');
+      tempPassword = `Admin@1${randHex}Z`;
+    }
+
     const admin = new User({
       name: adminName || companyName + ' Admin',
       email: adminEmail,
       password: tempPassword,
       role: 'Tenant Admin',
+      mustChangePassword: true,
     });
     await admin.save();
 

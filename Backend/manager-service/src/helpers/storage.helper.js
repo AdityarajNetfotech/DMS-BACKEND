@@ -14,21 +14,45 @@ const uploadToStorage = async (file) => {
 
   if (isCloudinary) {
     try {
-      const result = await cloudinary.uploader.upload(file.path, {
-        resource_type: 'auto',
-        folder: 'dms_documents'
-      });
+      const originalName = file.originalname || file.name || path.basename(file.path || 'document');
+      const ext = path.extname(originalName).toLowerCase();
+      const baseName = path.basename(originalName, ext);
+      const isPdf = ext === '.pdf' || file.mimetype === 'application/pdf';
+      const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.tiff'].includes(ext);
+
+      // Cloudinary configuration per file type
+      const uploadOptions = {
+        folder: 'dms_documents',
+        use_filename: true,
+        unique_filename: true,
+        filename_override: originalName,
+        access_mode: 'public'
+      };
+
+      if (isImage) {
+        uploadOptions.resource_type = 'image';
+      } else {
+        // PDF, DOCX, XLSX, PPTX, CSV, ZIP, TXT, etc.
+        uploadOptions.resource_type = 'raw';
+      }
+
+      const result = await cloudinary.uploader.upload(file.path, uploadOptions);
+
       // Delete temporary local file
-      fs.unlink(file.path, (err) => {
-        if (err) logger.error('Failed to delete temp file:', err);
-      });
+      if (fs.existsSync(file.path)) {
+        fs.unlink(file.path, (err) => {
+          if (err) logger.error('Failed to delete temp file:', err);
+        });
+      }
+
       return {
         url: result.secure_url,
-        publicId: result.public_id
+        publicId: result.public_id,
+        resourceType: result.resource_type || (isImage ? 'image' : 'raw')
       };
     } catch (error) {
       logger.error('Cloudinary Upload Error:', error);
-      throw new Error('Failed to upload file to Cloudinary');
+      throw new Error(`Failed to upload file to Cloudinary: ${error.message}`);
     }
   } else {
     // Local storage
@@ -57,14 +81,27 @@ const deleteFromStorage = async (url) => {
 
   if (isCloudinary) {
     try {
-      // Extract public ID from Cloudinary URL
-      // Format: https://res.cloudinary.com/.../v12345/dms_documents/filename.ext
+      // Cloudinary URL format:
+      // https://res.cloudinary.com/<cloud_name>/<resource_type>/upload/v12345/dms_documents/filename.ext
       const parts = url.split('/');
-      const publicIdWithExt = parts.slice(-2).join('/'); // dms_documents/filename.ext
-      const publicId = publicIdWithExt.split('.')[0]; // dms_documents/filename
+      const uploadIdx = parts.indexOf('upload');
+      
+      let resourceType = 'image';
+      if (uploadIdx > 0 && ['image', 'raw', 'video'].includes(parts[uploadIdx - 1])) {
+        resourceType = parts[uploadIdx - 1];
+      }
 
-      await cloudinary.uploader.destroy(publicId);
-      logger.info(`Deleted file from Cloudinary: ${publicId}`);
+      // Extract public ID (everything after /upload/v12345/ or /upload/)
+      let publicIdWithExt = parts.slice(uploadIdx + 1).join('/');
+      // Remove version prefix (e.g. v1709482910/)
+      publicIdWithExt = publicIdWithExt.replace(/^v\d+\//, '');
+
+      // For images/PDFs uploaded as image, public_id is without extension
+      // For raw files, public_id includes the extension
+      const publicId = resourceType === 'raw' ? publicIdWithExt : publicIdWithExt.replace(/\.[^/.]+$/, '');
+
+      await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+      logger.info(`Deleted file from Cloudinary: ${publicId} (type: ${resourceType})`);
     } catch (error) {
       logger.error('Cloudinary Deletion Error:', error);
     }
@@ -82,7 +119,58 @@ const deleteFromStorage = async (url) => {
   }
 };
 
+const uploadBufferToStorage = async (buffer, originalName = 'document.pdf', mimeType = 'application/pdf') => {
+  const isCloudinary = process.env.STORAGE_TYPE === 'cloudinary';
+
+  if (isCloudinary) {
+    return new Promise((resolve, reject) => {
+      const uploadOptions = {
+        folder: 'dms_documents',
+        use_filename: true,
+        unique_filename: true,
+        filename_override: originalName,
+        access_mode: 'public',
+        resource_type: 'raw'
+      };
+
+      const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+        if (error) {
+          logger.error('Cloudinary Buffer Upload Error:', error);
+          return reject(error);
+        }
+        resolve({
+          url: result.secure_url,
+          publicId: result.public_id,
+          resourceType: result.resource_type || 'raw'
+        });
+      });
+
+      const { Readable } = require('stream');
+      const stream = new Readable();
+      stream.push(buffer);
+      stream.push(null);
+      stream.pipe(uploadStream);
+    });
+  } else {
+    // Local storage
+    try {
+      const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(originalName) || '.pdf'}`;
+      const targetPath = path.join(destDir, fileName);
+      fs.writeFileSync(targetPath, buffer);
+      return {
+        url: `/uploads/${fileName}`,
+        publicId: fileName
+      };
+    } catch (error) {
+      logger.error('Local Buffer Save Error:', error);
+      throw new Error('Failed to save buffer locally');
+    }
+  }
+};
+
 module.exports = {
   uploadToStorage,
+  uploadBufferToStorage,
   deleteFromStorage
 };
+

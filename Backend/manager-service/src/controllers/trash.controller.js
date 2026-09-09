@@ -13,9 +13,11 @@ const getTrashList = async (req, res, next) => {
     }
 
     const folders = await req.Folder.find(folderQuery)
+      .sort({ updatedAt: -1, createdAt: -1 })
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');
     const documents = await req.Document.find(docQuery)
+      .sort({ updatedAt: -1, createdAt: -1 })
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 

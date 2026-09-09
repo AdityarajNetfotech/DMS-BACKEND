@@ -33,6 +33,37 @@ router.post('/login', tenantResolver, async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save();
 
+    // Log User Login activity
+    if (req.ActivityLog) {
+      try {
+        const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const userAgent = req.headers['user-agent'] || '';
+        let browser = 'Unknown', operatingSystem = 'Unknown';
+        if (userAgent.includes('Chrome')) browser = 'Chrome';
+        else if (userAgent.includes('Safari')) browser = 'Safari';
+        else if (userAgent.includes('Firefox')) browser = 'Firefox';
+        if (userAgent.includes('Windows')) operatingSystem = 'Windows';
+        else if (userAgent.includes('Macintosh')) operatingSystem = 'macOS';
+        else if (userAgent.includes('Linux')) operatingSystem = 'Linux';
+
+        const log = new req.ActivityLog({
+          managerId: user._id,
+          tenantId: req.tenant.companySlug,
+          action: 'User Login',
+          resource: 'Auth',
+          resourceId: user._id,
+          resourceName: user.name || user.email,
+          details: { role: user.role, email: user.email },
+          ipAddress,
+          browser,
+          operatingSystem
+        });
+        await log.save();
+      } catch (logErr) {
+        console.error('Failed to log login activity:', logErr);
+      }
+    }
+
     const tokens = generateTokens(user, req.tenant.companySlug);
     res.status(200).json({ 
       success: true, 
@@ -43,11 +74,46 @@ router.post('/login', tenantResolver, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/logout', tenantResolver, authenticate, async (req, res, next) => {
+  try {
+    if (req.ActivityLog && req.user) {
+      const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+      const userAgent = req.headers['user-agent'] || '';
+      let browser = 'Unknown', operatingSystem = 'Unknown';
+      if (userAgent.includes('Chrome')) browser = 'Chrome';
+      else if (userAgent.includes('Safari')) browser = 'Safari';
+      else if (userAgent.includes('Firefox')) browser = 'Firefox';
+      if (userAgent.includes('Windows')) operatingSystem = 'Windows';
+      else if (userAgent.includes('Macintosh')) operatingSystem = 'macOS';
+      else if (userAgent.includes('Linux')) operatingSystem = 'Linux';
+
+      const user = await req.User.findById(req.user.userId);
+      const log = new req.ActivityLog({
+        managerId: req.user.userId,
+        tenantId: req.tenant.companySlug,
+        action: 'User Logout',
+        resource: 'Auth',
+        resourceId: req.user.userId,
+        resourceName: user ? (user.name || user.email) : 'User',
+        details: { role: req.user.role },
+        ipAddress,
+        browser,
+        operatingSystem
+      });
+      await log.save().catch(e => console.error('Failed to log logout activity:', e));
+    }
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (err) { next(err); }
+});
+
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+const PASSWORD_COMPLEXITY_MSG = 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.';
+
 router.post('/change-password', tenantResolver, authenticate, async (req, res, next) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+    if (!newPassword || !PASSWORD_REGEX.test(newPassword)) {
+      return res.status(400).json({ success: false, message: PASSWORD_COMPLEXITY_MSG });
     }
 
     const user = await req.User.findById(req.user.userId);
@@ -125,8 +191,8 @@ router.post('/verify-otp', tenantResolver, async (req, res, next) => {
 router.post('/reset-password', tenantResolver, async (req, res, next) => {
   try {
     const { email, resetToken, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+    if (!newPassword || !PASSWORD_REGEX.test(newPassword)) {
+      return res.status(400).json({ success: false, message: PASSWORD_COMPLEXITY_MSG });
     }
 
     const user = await req.User.findOne({ email });

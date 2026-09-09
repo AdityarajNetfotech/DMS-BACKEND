@@ -23,6 +23,15 @@ const folderSchema = new mongoose.Schema({
     type: String,
     default: 'folder',
   },
+  folderCategory: {
+    type: String,
+    enum: ['General', 'Legal', 'Compliance', 'Confidential'],
+    default: 'General',
+  },
+  isSystemFolder: {
+    type: Boolean,
+    default: false,
+  },
   departmentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department',

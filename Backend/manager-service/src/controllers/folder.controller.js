@@ -58,6 +58,11 @@ const calculateFolderSize = async (folderId, Folder, Document, tenantId) => {
 };
 
 const isFolderAccessible = async (folder, userId, tenantId, Folder, Share) => {
+  // System folders are accessible to all workspace users
+  if (folder.isSystemFolder || folder.folderCategory === 'Legal' || folder.folderCategory === 'Compliance' || folder.folderCategory === 'Confidential' || folder.name === 'Legal Documents' || folder.name === 'Compliance Documents' || folder.name === 'Confidential Documents') {
+    return { accessible: true, uploadAllowed: true };
+  }
+
   // If user is owner
   if (folder.createdBy?.toString() === userId || folder.createdBy?._id?.toString() === userId) {
     return { accessible: true, uploadAllowed: true };
@@ -100,20 +105,32 @@ const getFolderDetails = async (req, res, next) => {
     const userRole = req.user.role;
 
     if (req.params.id === 'root') {
+      await folderService.ensureDefaultSystemFolders(req);
+
       const folderQuery = { parentFolder: null, tenantId, isDeleted: false };
       const docQuery = { folderId: null, tenantId, isDeleted: false };
 
-      if (userRole !== 'Tenant Admin') {
-        folderQuery.createdBy = userId;
+      if (!['Tenant Admin', 'Reporting Manager', 'Legal Team', 'Compliance Team'].includes(userRole)) {
+        folderQuery.$or = [
+          { createdBy: userId },
+          { isSystemFolder: true },
+          { folderCategory: { $in: ['Legal', 'Compliance', 'Confidential'] } },
+          { name: { $in: ['Legal Documents', 'Compliance Documents', 'Confidential Documents'] } }
+        ];
         docQuery.uploadedBy = userId;
       }
 
       const childFolders = await Folder.find(folderQuery)
+        .sort({ createdAt: -1 })
         .populate('createdBy', 'name')
         .populate('departmentId', 'name');
       const documents = await Document.find(docQuery)
-        .populate('uploadedBy', 'name')
-        .populate('departmentId', 'name');
+        .sort({ createdAt: -1 })
+        .populate('uploadedBy', 'name email role')
+        .populate('departmentId', 'name')
+        .populate('approvalWorkflow.reportingApproval.approvedBy', 'name email role')
+        .populate('approvalWorkflow.legalApproval.approvedBy', 'name email role')
+        .populate('approvalWorkflow.complianceApproval.approvedBy', 'name email role');
 
       // Calculate sizes for childFolders
       const childFoldersWithSizes = [];
@@ -154,11 +171,16 @@ const getFolderDetails = async (req, res, next) => {
     }
 
     const childFolders = await Folder.find({ parentFolder: folder._id, tenantId, isDeleted: false })
+      .sort({ createdAt: -1 })
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');
     const documents = await Document.find({ folderId: folder._id, tenantId, isDeleted: false })
-      .populate('uploadedBy', 'name')
-      .populate('departmentId', 'name');
+      .sort({ createdAt: -1 })
+      .populate('uploadedBy', 'name email role')
+      .populate('departmentId', 'name')
+      .populate('approvalWorkflow.reportingApproval.approvedBy', 'name email role')
+      .populate('approvalWorkflow.legalApproval.approvedBy', 'name email role')
+      .populate('approvalWorkflow.complianceApproval.approvedBy', 'name email role');
 
     // Calculate sizes for childFolders
     const childFoldersWithSizes = [];

@@ -22,7 +22,28 @@ const moveFolderSchema = Joi.object({
 const updateDocumentSchema = Joi.object({
   name: Joi.string().trim().max(100),
   description: Joi.string().allow('').max(500),
-  tags: Joi.array().items(Joi.string().trim().max(50))
+  tags: Joi.array().items(Joi.string().trim().max(50)),
+  documentType: Joi.string().allow('').trim().max(100),
+  customerId: Joi.string().allow('').trim().max(100),
+  customerName: Joi.string().allow('').trim().max(100),
+  customerRef: Joi.string().allow('').trim().max(100),
+  accountNumber: Joi.string().allow('').trim().max(100),
+  cifNumber: Joi.string().allow('').trim().max(100),
+  ifscCode: Joi.string().allow('').trim().max(100),
+  facilityNumber: Joi.string().allow('').trim().max(100),
+  facilityRef: Joi.string().allow('').trim().max(100),
+  branch: Joi.string().allow('').trim().max(100),
+  branchCode: Joi.string().allow('').trim().max(100),
+  accountType: Joi.string().allow('').trim().max(100),
+  signatory: Joi.string().allow('').trim().max(100),
+  partner: Joi.string().allow('').trim().max(100),
+  typeOfService: Joi.string().allow('').trim().max(100),
+  documentDate: Joi.date().allow(null, ''),
+  executionDate: Joi.date().allow(null, ''),
+  expiryDate: Joi.date().allow(null, ''),
+  requestingDate: Joi.date().allow(null, ''),
+  isConfidential: Joi.boolean(),
+  watermarkText: Joi.string().allow('').max(100)
 });
 
 const lockDocumentSchema = Joi.object({

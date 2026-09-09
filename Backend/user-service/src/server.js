@@ -9,7 +9,8 @@ const { tenantResolver } = require('./shared/middleware/tenant.resolver');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const router = express.Router({ mergeParams: true });
 
@@ -28,12 +29,30 @@ router.get('/profile', async (req, res, next) => {
 // Update profile of current user
 router.put('/profile', async (req, res, next) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, email, phone, signature, signatureType, signatureInitials, signatureFont } = req.body;
     const user = await req.User.findById(req.user.userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (name) user.name = name;
     if (phone !== undefined) user.phone = phone;
+    if (signature !== undefined) {
+      user.signature = signature;
+      user.signatureUpdatedAt = new Date();
+      user.markModified('signature');
+    }
+    if (signatureType !== undefined) {
+      user.signatureType = signatureType;
+      user.markModified('signatureType');
+    }
+    if (signatureInitials !== undefined) {
+      user.signatureInitials = signatureInitials;
+      user.markModified('signatureInitials');
+    }
+    if (signatureFont !== undefined) {
+      user.signatureFont = signatureFont;
+      user.markModified('signatureFont');
+    }
+
     if (email && email.toLowerCase() !== user.email.toLowerCase()) {
       const existingUser = await req.User.findOne({ email: email.toLowerCase() });
       if (existingUser) {
@@ -48,9 +67,12 @@ router.put('/profile', async (req, res, next) => {
 });
 
 // Get Users
-router.get('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, next) => {
+router.get('/', authorizeRoles('Tenant Admin', 'Manager', 'Reporting Manager', 'Legal Team', 'Compliance Team'), async (req, res, next) => {
   try {
-    const users = await req.User.find().populate('departmentId', 'name').select('-password');
+    const users = await req.User.find()
+      .populate('departmentId', 'name')
+      .populate('reportingManagerId', 'name email')
+      .select('-password');
     res.status(200).json({ success: true, data: users });
   } catch (err) { next(err); }
 });
@@ -84,9 +106,10 @@ router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, nex
       });
     }
 
-    const { name, email, role, password, departmentId } = req.body;
+    const { name, email, role, password, departmentId, reportingManagerId } = req.body;
     if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
-    if (!['Manager', 'Viewer'].includes(role)) return res.status(400).json({ success: false, message: 'Invalid role' });
+    const allowedRoles = ['Manager', 'Reporting Manager', 'Legal Team', 'Compliance Team', 'Viewer'];
+    if (!allowedRoles.includes(role)) return res.status(400).json({ success: false, message: `Invalid role. Allowed roles: ${allowedRoles.join(', ')}` });
     
     // Managers can only create Viewers
     if (req.user.role === 'Manager' && role !== 'Viewer') {
@@ -114,8 +137,30 @@ router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, nex
       }
     }
     
-    const tempPassword = password || crypto.randomBytes(8).toString('hex');
-    const user = new req.User({ name, email, role, password: tempPassword, departmentId: departmentId || null });
+    const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+    let tempPassword = password;
+    if (tempPassword) {
+      if (!PASSWORD_REGEX.test(tempPassword)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.'
+        });
+      }
+    } else {
+      // Generate guaranteed complexity-compliant temporary password
+      const randHex = crypto.randomBytes(4).toString('hex');
+      tempPassword = `Temp@1${randHex}A`;
+    }
+
+    const user = new req.User({ 
+      name, 
+      email, 
+      role, 
+      password: tempPassword, 
+      mustChangePassword: true,
+      departmentId: departmentId || null,
+      reportingManagerId: reportingManagerId || null
+    });
     await user.save();
 
     // Direct REST API Call to Email Service
@@ -139,7 +184,7 @@ router.post('/', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, nex
 // Update User
 router.put('/:id', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, next) => {
   try {
-    const { name, email, role, status } = req.body;
+    const { name, email, role, status, departmentId, reportingManagerId } = req.body;
     const userToUpdate = await req.User.findById(req.params.id);
     if (!userToUpdate) return res.status(404).json({ success: false, message: 'User not found' });
 
@@ -154,6 +199,10 @@ router.put('/:id', authorizeRoles('Tenant Admin', 'Manager'), async (req, res, n
     }
 
     if (name) userToUpdate.name = name;
+    if (departmentId !== undefined) userToUpdate.departmentId = departmentId || null;
+    if (reportingManagerId !== undefined) userToUpdate.reportingManagerId = reportingManagerId || null;
+    if (role) userToUpdate.role = role;
+    if (status) userToUpdate.status = status;
     if (email) {
       const emailLower = email.trim().toLowerCase();
       const domain = emailLower.split("@")[1] || "";

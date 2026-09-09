@@ -176,19 +176,119 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
     await folder.save();
   }
 
-  await activityService.logActivity(req, 'Folder Created', 'Folder', folder._id);
+  await activityService.logActivity(req, 'Folder Created', 'Folder', folder._id, folder.name);
 
   return folder;
 };
 
+const ensureDefaultSystemFolders = async (req) => {
+  try {
+    const Folder = req.Folder;
+    const tenantId = req.user.companySlug;
+    const userId = req.user.userId;
+
+    // 1. Legal Documents
+    let legal = await Folder.findOne({
+      tenantId,
+      parentFolder: null,
+      isDeleted: false,
+      $or: [{ folderCategory: 'Legal' }, { name: 'Legal Documents' }]
+    });
+
+    if (!legal) {
+      legal = new Folder({
+        name: 'Legal Documents',
+        description: 'System folder for contracts, loan agreements, and legal deeds requiring Legal Team & Reporting Manager approval.',
+        parentFolder: null,
+        folderColor: '#6366F1',
+        folderIcon: 'scale',
+        folderCategory: 'Legal',
+        isSystemFolder: true,
+        tenantId,
+        createdBy: userId,
+        departmentId: req.user.departmentId || null
+      });
+      await legal.save();
+    } else if (!legal.folderCategory || legal.folderCategory === 'General') {
+      legal.folderCategory = 'Legal';
+      legal.isSystemFolder = true;
+      await legal.save();
+    }
+
+    // 2. Compliance Documents
+    let compliance = await Folder.findOne({
+      tenantId,
+      parentFolder: null,
+      isDeleted: false,
+      $or: [{ folderCategory: 'Compliance' }, { name: 'Compliance Documents' }]
+    });
+
+    if (!compliance) {
+      compliance = new Folder({
+        name: 'Compliance Documents',
+        description: 'System folder for KYC records, regulatory filings, and compliance certificates requiring Compliance Team & Reporting Manager approval.',
+        parentFolder: null,
+        folderColor: '#10B981',
+        folderIcon: 'shield',
+        folderCategory: 'Compliance',
+        isSystemFolder: true,
+        tenantId,
+        createdBy: userId,
+        departmentId: req.user.departmentId || null
+      });
+      await compliance.save();
+    } else if (!compliance.folderCategory || compliance.folderCategory === 'General') {
+      compliance.folderCategory = 'Compliance';
+      compliance.isSystemFolder = true;
+      await compliance.save();
+    }
+
+    // 3. Confidential Documents
+    let confidential = await Folder.findOne({
+      tenantId,
+      parentFolder: null,
+      isDeleted: false,
+      $or: [{ folderCategory: 'Confidential' }, { name: 'Confidential Documents' }]
+    });
+
+    if (!confidential) {
+      confidential = new Folder({
+        name: 'Confidential Documents',
+        description: 'System folder for proprietary, confidential documents with dynamic watermark protection upon preview and download.',
+        parentFolder: null,
+        folderColor: '#EF4444',
+        folderIcon: 'lock',
+        folderCategory: 'Confidential',
+        isSystemFolder: true,
+        tenantId,
+        createdBy: userId,
+        departmentId: req.user.departmentId || null
+      });
+      await confidential.save();
+    } else if (!confidential.folderCategory || confidential.folderCategory === 'General') {
+      confidential.folderCategory = 'Confidential';
+      confidential.isSystemFolder = true;
+      await confidential.save();
+    }
+  } catch (err) {
+    logger.error('Failed to ensure default system folders:', err.message);
+  }
+};
+
 const getFolderTree = async (req) => {
+  await ensureDefaultSystemFolders(req);
+
   const tenantId = req.user.companySlug;
   const userId = req.user.userId;
   const userRole = req.user.role;
 
   const query = { tenantId, isDeleted: false };
-  if (userRole !== 'Tenant Admin') {
-    query.createdBy = userId;
+  if (!['Tenant Admin', 'Reporting Manager', 'Legal Team', 'Compliance Team'].includes(userRole)) {
+    query.$or = [
+      { createdBy: userId },
+      { isSystemFolder: true },
+      { folderCategory: { $in: ['Legal', 'Compliance'] } }
+    ];
   }
   const folders = await req.Folder.find(query).lean();
 
@@ -252,7 +352,7 @@ const softDeleteFolder = async (req, folderId) => {
   });
   await trash.save();
 
-  await activityService.logActivity(req, 'Folder Deleted', 'Folder', folder._id);
+  await activityService.logActivity(req, 'Folder Deleted', 'Folder', folder._id, folder.name);
 };
 
 const restoreFolder = async (req, folderId) => {
@@ -275,7 +375,7 @@ const restoreFolder = async (req, folderId) => {
     await folder.save();
     await recursivelyRestore(req, folder._id);
     await Trash.deleteOne({ tenantId, resourceType: 'Folder', resourceId: folder._id });
-    await activityService.logActivity(req, 'Folder Restored', 'Folder', folder._id);
+    await activityService.logActivity(req, 'Folder Restored', 'Folder', folder._id, folder.name);
     return;
   }
 
@@ -291,7 +391,7 @@ const restoreFolder = async (req, folderId) => {
       departmentId: req.user.departmentId || null
     });
     await trashFolder.save();
-    await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id);
+    await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id, trashFolder.name);
   } else if (trashFolder.isDeleted) {
     trashFolder.isDeleted = false;
     trashFolder.deletedAt = null;
@@ -310,7 +410,7 @@ const restoreFolder = async (req, folderId) => {
 
   await Trash.deleteOne({ tenantId, resourceType: 'Folder', resourceId: folder._id });
 
-  await activityService.logActivity(req, 'Folder Restored', 'Folder', folder._id);
+  await activityService.logActivity(req, 'Folder Restored', 'Folder', folder._id, folder.name);
 };
 
 const permanentlyDeleteFolder = async (req, folderId) => {
@@ -321,6 +421,8 @@ const permanentlyDeleteFolder = async (req, folderId) => {
   const folder = await Folder.findOne({ _id: folderId, tenantId, isDeleted: true });
   if (!folder) throw new Error('Folder not found in Trash');
 
+  const folderName = folder.name;
+
   // Recursively wipe children and release storage
   await recursivelyPermanentDelete(req, folder._id);
 
@@ -329,7 +431,7 @@ const permanentlyDeleteFolder = async (req, folderId) => {
 
   await Trash.deleteOne({ tenantId, resourceType: 'Folder', resourceId: folder._id });
 
-  await activityService.logActivity(req, 'Folder Permanently Deleted', 'Folder', folder._id);
+  await activityService.logActivity(req, 'Folder Permanently Deleted', 'Folder', folder._id, folderName);
 };
 
 const downloadZip = async (req, folderId) => {
@@ -390,6 +492,7 @@ const toggleFolderFavorite = async (req, folderId, isFavorite) => {
 module.exports = {
   createFolder,
   getFolderTree,
+  ensureDefaultSystemFolders,
   softDeleteFolder,
   restoreFolder,
   permanentlyDeleteFolder,

@@ -29,7 +29,16 @@ const globalSearch = async (req, res, next) => {
       page = 1, 
       limit = 10,
       customerOrFilename,
-      idQuery
+      idQuery,
+      // Banking metadata filters
+      documentType,
+      customerRef,
+      facilityRef,
+      signatory,
+      partner,
+      expiryDateFrom,
+      expiryDateTo,
+      aiConfidence
     } = req.query;
 
     const skip = (page - 1) * limit;
@@ -49,7 +58,12 @@ const globalSearch = async (req, res, next) => {
           { originalFileName: { $regex: query, $options: 'i' } },
           { tags: { $in: [new RegExp(query, 'i')] } },
           { description: { $regex: query, $options: 'i' } },
-          { extractedText: { $regex: query, $options: 'i' } }
+          { extractedText: { $regex: query, $options: 'i' } },
+          { documentType: { $regex: query, $options: 'i' } },
+          { customerRef: { $regex: query, $options: 'i' } },
+          { facilityRef: { $regex: query, $options: 'i' } },
+          { signatory: { $regex: query, $options: 'i' } },
+          { partner: { $regex: query, $options: 'i' } }
         ]
       });
     }
@@ -111,6 +125,19 @@ const globalSearch = async (req, res, next) => {
       docFilter.createdAt = {};
       if (startDate) docFilter.createdAt.$gte = new Date(startDate);
       if (endDate) docFilter.createdAt.$lte = new Date(endDate);
+    }
+
+    // --- Banking Metadata Filters ---
+    if (documentType) docFilter.documentType = { $regex: documentType, $options: 'i' };
+    if (customerRef) docFilter.customerRef = { $regex: customerRef, $options: 'i' };
+    if (facilityRef) docFilter.facilityRef = { $regex: facilityRef, $options: 'i' };
+    if (signatory) docFilter.signatory = { $regex: signatory, $options: 'i' };
+    if (partner) docFilter.partner = { $regex: partner, $options: 'i' };
+    if (aiConfidence) docFilter.aiConfidence = aiConfidence;
+    if (expiryDateFrom || expiryDateTo) {
+      docFilter.expiryDate = {};
+      if (expiryDateFrom) docFilter.expiryDate.$gte = new Date(expiryDateFrom);
+      if (expiryDateTo) docFilter.expiryDate.$lte = new Date(expiryDateTo);
     }
 
     if (isFavorite === 'true') {

@@ -1,6 +1,56 @@
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const cloudinaryHelper = require('../helpers/cloudinary.helper');
+
+// Helper to fetch all document IDs permitted to a viewer via active shares
+const getPermittedDocIdsForViewer = async (req) => {
+  const tenantId = req.user.companySlug;
+  const userId = req.user.userId;
+  const objectIdUserId = new (require('mongoose').Types.ObjectId)(userId);
+  const now = new Date();
+
+  // Find all active internal shares for this viewer
+  const shares = await req.Share.find({
+    tenantId,
+    sharingType: 'Internal',
+    $or: [
+      { sharedWithViewers: objectIdUserId },
+      { sharedWithViewers: { $exists: true, $size: 0 } },
+      { sharedWithViewers: { $exists: false } }
+    ],
+    $and: [
+      {
+        $or: [
+          { expiryDate: null },
+          { expiryDate: { $gt: now } }
+        ]
+      }
+    ]
+  }).lean();
+
+  const directDocIds = [];
+  const folderIds = [];
+
+  shares.forEach(s => {
+    if (s.documentId) directDocIds.push(s.documentId.toString());
+    if (s.folderId) folderIds.push(s.folderId);
+  });
+
+  // Also include all documents in permitted folders
+  let folderDocIds = [];
+  if (folderIds.length > 0) {
+    const docsInFolders = await req.Document.find({
+      tenantId,
+      folderId: { $in: folderIds },
+      isDeleted: false,
+      isArchived: false
+    }).select('_id').lean();
+    folderDocIds = docsInFolders.map(d => d._id.toString());
+  }
+
+  return Array.from(new Set([...directDocIds, ...folderDocIds]));
+};
 
 // Dashboard statistics
 const getDashboardStats = async (req, res, next) => {
@@ -9,9 +59,10 @@ const getDashboardStats = async (req, res, next) => {
     const userId = req.user.userId;
     const objectIdUserId = new (require('mongoose').Types.ObjectId)(userId);
 
-    const totalDocs = await req.Document.countDocuments({ tenantId, isDeleted: false, isArchived: false });
+    const permittedDocIds = await getPermittedDocIdsForViewer(req);
+    const totalDocs = permittedDocIds.length;
     const totalFolders = await req.Folder.countDocuments({ tenantId, isDeleted: false, isArchived: false });
-    const favoriteCount = await req.Favorite.countDocuments({ tenantId, userId });
+    const favoriteCount = await req.Favorite.countDocuments({ tenantId, userId, documentId: { $in: permittedDocIds } });
 
     const sharedCount = await req.Share.countDocuments({
       tenantId,
@@ -157,6 +208,14 @@ const getDocumentDetails = async (req, res, next) => {
     const doc = await Document.findOne({ _id: req.params.id, tenantId, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
+    // Permitted check for Viewers
+    if (req.user.role === 'Viewer') {
+      const permittedIds = await getPermittedDocIdsForViewer(req);
+      if (!permittedIds.includes(doc._id.toString())) {
+        return res.status(403).json({ success: false, message: 'Access denied. You do not have permission to view this document.' });
+      }
+    }
+
     const versions = await Version.find({ documentId: doc._id }).sort({ versionNumber: -1 });
 
     res.status(200).json({
@@ -171,7 +230,7 @@ const getDocumentDetails = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Download Document
+// Download Document - Disabled for Viewers
 const downloadDocument = async (req, res, next) => {
   try {
     const Document = req.Document;
@@ -180,51 +239,44 @@ const downloadDocument = async (req, res, next) => {
     const doc = await Document.findOne({ _id: req.params.id, tenantId });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
-    // Only enforce share checks for Viewers
+    // Strictly disable download for Viewers
     if (req.user.role === 'Viewer') {
-      const Share = req.Share;
-      const userId = req.user.userId;
-
-      const share = await Share.findOne({
-        tenantId,
-        sharingType: 'Internal',
-        $or: [
-          { documentId: doc._id },
-          { folderId: doc.folderId }
-        ],
-        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId)
+      return res.status(403).json({
+        success: false,
+        message: 'Download access is disabled for Viewer role. Only document preview is permitted.'
       });
-
-      if (!share) {
-        return res.status(403).json({ success: false, message: 'Access denied. This file has not been shared with you.' });
-      }
-
-      if (!share.permissions.download) {
-        return res.status(403).json({ success: false, message: 'Download is disabled for this file.' });
-      }
     }
 
     doc.downloadCount += 1;
     await doc.save();
 
+    const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
+    const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
+
     if (doc.storageUrl.startsWith('/uploads')) {
       const filePath = path.join(__dirname, '../../', doc.storageUrl);
       if (fs.existsSync(filePath)) {
-        return res.download(filePath, doc.originalFileName);
+        return res.download(filePath, docFileName);
       }
       return res.status(404).json({ success: false, message: 'Physical file not found locally' });
     } else {
-      // For Cloudinary/remote URLs: insert fl_attachment to force download via browser redirect
-      let downloadUrl = doc.storageUrl;
-      if (downloadUrl.includes('/upload/')) {
-        downloadUrl = downloadUrl.replace('/upload/', '/upload/fl_attachment/');
-      }
-      return res.redirect(downloadUrl);
+      return cloudinaryHelper.streamRemoteFile(
+        doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        true
+      );
     }
   } catch (err) { next(err); }
 };
 
-// Preview Document
+// Helper to stream remote files (Cloudinary, S3, etc.) directly to the client
+const streamRemoteFile = (url, res, fileName, mimeType, isDownload = false) => {
+  return cloudinaryHelper.streamRemoteFile(url, res, fileName, mimeType, isDownload);
+};
+
+// Preview Document - Restricted to permitted documents for Viewers
 const previewDocument = async (req, res, next) => {
   try {
     const Document = req.Document;
@@ -233,35 +285,58 @@ const previewDocument = async (req, res, next) => {
     const doc = await Document.findOne({ _id: req.params.id, tenantId, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
 
-    // Only enforce share checks for Viewers
+    // Permitted check for Viewers
     if (req.user.role === 'Viewer') {
-      const Share = req.Share;
-      const userId = req.user.userId;
-
-      const share = await Share.findOne({
-        tenantId,
-        sharingType: 'Internal',
-        $or: [
-          { documentId: doc._id },
-          { folderId: doc.folderId }
-        ],
-        sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId)
-      });
-
-      if (!share) {
-        return res.status(403).json({ success: false, message: 'Access denied. This file has not been shared with you.' });
+      const permittedIds = await getPermittedDocIdsForViewer(req);
+      if (!permittedIds.includes(doc._id.toString())) {
+        return res.status(403).json({ success: false, message: 'Access denied. You do not have permission to preview this document.' });
       }
     }
 
-    if (doc.storageUrl.startsWith('/uploads')) {
-      const filePath = path.join(__dirname, '../../', doc.storageUrl);
-      if (fs.existsSync(filePath)) {
-        res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
-        return res.sendFile(filePath);
+    const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
+    const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
+
+    if (doc.storageUrl.startsWith('/uploads') || doc.storageUrl.startsWith('uploads') || !doc.storageUrl.startsWith('http')) {
+      const fileName = path.basename(doc.storageUrl);
+      const possiblePaths = [
+        path.join(__dirname, '../../uploads', fileName),
+        path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl),
+        path.join(process.cwd(), 'uploads', fileName)
+      ];
+      let foundPath = possiblePaths.find((p) => fs.existsSync(p));
+
+      if (foundPath) {
+        let finalMimeType = doc.mimeType;
+        if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+          const ext = path.extname(foundPath).toLowerCase();
+          const mimeMap = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.pdf': 'application/pdf',
+            '.txt': 'text/plain',
+            '.csv': 'text/csv',
+            '.json': 'application/json'
+          };
+          finalMimeType = mimeMap[ext] || 'application/octet-stream';
+        }
+        res.setHeader('Content-Type', finalMimeType);
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
+        return res.sendFile(foundPath);
       }
       return res.status(404).json({ success: false, message: 'Physical file not found locally' });
     } else {
-      return res.redirect(doc.storageUrl);
+      return cloudinaryHelper.streamRemoteFile(
+        doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        false
+      );
     }
   } catch (err) { next(err); }
 };
@@ -288,6 +363,12 @@ const globalSearch = async (req, res, next) => {
 
     const docFilter = { tenantId, isDeleted: false, isArchived: false };
     
+    // Scope search to permitted documents only for Viewers
+    if (req.user.role === 'Viewer') {
+      const permittedDocIds = await getPermittedDocIdsForViewer(req);
+      docFilter._id = { $in: permittedDocIds };
+    }
+
     if (query) {
       docFilter.$or = [
         { name: { $regex: query, $options: 'i' } },
@@ -497,19 +578,28 @@ const downloadSharedFile = async (req, res, next) => {
     doc.downloadCount += 1;
     await doc.save();
 
+    const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
+    const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
+
     if (doc.storageUrl.startsWith('/uploads')) {
       const filePath = path.join(__dirname, '../../', doc.storageUrl);
       if (fs.existsSync(filePath)) {
-        return res.download(filePath, doc.originalFileName);
+        return res.download(filePath, docFileName);
       }
       return res.status(404).json({ success: false, message: 'File asset not found locally' });
     } else {
-      return res.redirect(doc.storageUrl);
+      return cloudinaryHelper.streamRemoteFile(
+        doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        true
+      );
     }
   } catch (err) { next(err); }
 };
 
-// Get all documents for viewer
+// Get all documents for viewer (Scoped to permitted documents)
 const getAllDocuments = async (req, res, next) => {
   try {
     const Document = req.Document;
@@ -517,7 +607,13 @@ const getAllDocuments = async (req, res, next) => {
     const tenantId = req.user.companySlug;
     const userId = req.user.userId;
 
-    const documents = await Document.find({ tenantId, isDeleted: false, isArchived: false })
+    let query = { tenantId, isDeleted: false, isArchived: false };
+    if (req.user.role === 'Viewer') {
+      const permittedIds = await getPermittedDocIdsForViewer(req);
+      query._id = { $in: permittedIds };
+    }
+
+    const documents = await Document.find(query)
       .populate('folderId')
       .lean();
     const favorites = await Favorite.find({ tenantId, userId });

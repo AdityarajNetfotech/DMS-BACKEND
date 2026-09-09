@@ -29,12 +29,17 @@ const tenantResolver = async (req, res, next) => {
     if (!tenantDbConnection.models.Department) {
       tenantDbConnection.model('Department', departmentSchema);
     }
+    const activityLogSchema = require('../models/activityLog.model');
+    if (!tenantDbConnection.models.ActivityLog) {
+      tenantDbConnection.model('ActivityLog', activityLogSchema);
+    }
 
     // Attach to request object
     req.tenant = tenant;
     req.tenantDb = tenantDbConnection;
     req.User = tenantDbConnection.model('User');
     req.Department = tenantDbConnection.model('Department');
+    req.ActivityLog = tenantDbConnection.model('ActivityLog');
 
     // Compute isAccessLocked based on Trial expiration or plan expiration
     const regDate = tenant.registrationDate || tenant.createdAt;

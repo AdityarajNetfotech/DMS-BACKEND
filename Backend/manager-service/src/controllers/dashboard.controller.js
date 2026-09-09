@@ -25,7 +25,7 @@ const getDashboardStats = async (req, res, next) => {
 
     const recentDocs = await req.Document.find(docFilter)
       .sort({ createdAt: -1 })
-      .limit(7)
+      .limit(50)
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name');
 

@@ -20,8 +20,13 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['Tenant Admin', 'Manager', 'Viewer'],
+    enum: ['Tenant Admin', 'Manager', 'Reporting Manager', 'Legal Team', 'Compliance Team', 'Viewer'],
     required: true,
+  },
+  reportingManagerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
   },
   departmentId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -31,6 +36,26 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     default: '',
+  },
+  signature: {
+    type: String,
+    default: '',
+  },
+  signatureType: {
+    type: String,
+    default: '',
+  },
+  signatureInitials: {
+    type: String,
+    default: '',
+  },
+  signatureFont: {
+    type: String,
+    default: 'Great Vibes',
+  },
+  signatureUpdatedAt: {
+    type: Date,
+    default: null,
   },
   isActive: {
     type: Boolean,

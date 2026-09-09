@@ -5,10 +5,14 @@ const AdmZip = require('adm-zip');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const storageHelper = require('../helpers/storage.helper');
+const cloudinaryHelper = require('../helpers/cloudinary.helper');
 const storageService = require('./storage.service');
 const activityService = require('./activity.service');
+const aiHelper = require('../helpers/ai.helper');
+const securityHelper = require('../helpers/security.helper');
+const signatureService = require('./signature.service');
 
-const extractTextFromFile = async (filePath, ext) => {
+const extractTextFromFile = async (filePath, ext, geminiKey, openAiKey) => {
   try {
     if (!fs.existsSync(filePath)) {
       return '';
@@ -19,11 +23,15 @@ const extractTextFromFile = async (filePath, ext) => {
     if (fileTypeUpper === 'PDF') {
       try {
         const pdfData = await pdfParse(rawBuffer);
-        return pdfData.text || '';
+        if (pdfData.text && pdfData.text.trim().length > 50) {
+          return pdfData.text;
+        }
       } catch (err) {
-        console.error('PDF parsing failed:', err);
-        return '';
+        console.error('Digital PDF parsing failed, attempting OCR:', err.message);
       }
+      // Scanned PDF fallback
+      console.log('Performing OCR on scanned PDF...');
+      return await aiHelper.ocrWithGemini(rawBuffer, 'application/pdf', geminiKey, openAiKey);
     } else if (fileTypeUpper === 'DOCX') {
       try {
         const docxData = await mammoth.extractRawText({ buffer: rawBuffer });
@@ -32,6 +40,13 @@ const extractTextFromFile = async (filePath, ext) => {
         console.error('DOCX parsing failed:', err);
         return '';
       }
+    } else if (['JPG', 'JPEG', 'PNG', 'TIFF', 'TIF', 'WEBP', 'BMP'].includes(fileTypeUpper)) {
+      const imgMime = fileTypeUpper === 'PNG' ? 'image/png'
+        : ['TIFF', 'TIF'].includes(fileTypeUpper) ? 'image/tiff'
+        : fileTypeUpper === 'WEBP' ? 'image/webp'
+        : 'image/jpeg';
+      console.log(`Performing OCR on uploaded ${fileTypeUpper} image...`);
+      return await aiHelper.ocrWithGemini(rawBuffer, imgMime, geminiKey, openAiKey);
     } else if (['XLSX', 'PPTX'].includes(fileTypeUpper)) {
       const matches = rawBuffer.toString('binary').match(/[ -~]{4,}/g);
       if (matches) {
@@ -50,7 +65,7 @@ const extractTextFromFile = async (filePath, ext) => {
       return rawBuffer.toString('utf8');
     }
   } catch (error) {
-    console.error('Text extraction failed:', error);
+    console.error('Text extraction / OCR failed:', error);
   }
   return '';
 };
@@ -64,6 +79,18 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
 
   const ext = path.extname(file.originalname);
   const docName = name || path.basename(file.originalname, ext);
+
+  let fileHash = '';
+  // Security Check: File Signature & Malware Scanning + SHA-256 Hashing
+  if (file && file.path && fs.existsSync(file.path)) {
+    const rawBuffer = fs.readFileSync(file.path);
+    fileHash = securityHelper.computeFileHash(rawBuffer);
+    const scanResult = await securityHelper.scanFileForMalware(rawBuffer, file.originalname);
+    if (!scanResult.isClean) {
+      fs.unlinkSync(file.path);
+      throw new Error(`Security Threat Detected: ${scanResult.threatFound}`);
+    }
+  }
 
   // Check if document with the same name exists in the folder
   let document = await Document.findOne({ name: docName, folderId: folderId || null, tenantId, isDeleted: false });
@@ -90,10 +117,27 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
     });
     await versionHistory.save();
 
+    const geminiKey = req.headers?.['x-gemini-key'] || process.env.GEMINI_API_KEY;
+    const openAiKey = req.headers?.['x-openai-key'] || process.env.OPENAI_API_KEY;
+
     // Extract text from the new file before it gets uploaded/moved
     let extractedText = '';
     if (file && file.path) {
-      extractedText = await extractTextFromFile(file.path, ext);
+      extractedText = await extractTextFromFile(file.path, ext, geminiKey, openAiKey);
+    }
+
+    // AI Classification & Metadata Extraction on new version
+    let aiMeta = null;
+    try {
+      const textForAI = extractedText || document.name;
+      aiMeta = await aiHelper.classifyAndExtractMetadata(
+        textForAI,
+        file.originalname,
+        geminiKey,
+        openAiKey
+      );
+    } catch (aiErr) {
+      console.error('AI classification failed on version update (non-blocking):', aiErr.message);
     }
 
     // Upload the new file asset
@@ -108,6 +152,38 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
     document.extractedText = extractedText;
     if (description) document.description = description;
     if (tags && tags.length > 0) document.tags = tags;
+
+    // Apply AI-extracted metadata if available
+    if (aiMeta) {
+      if (aiMeta.documentType && aiMeta.documentType !== 'Other') document.documentType = aiMeta.documentType;
+      if (aiMeta.customerId) document.customerId = aiMeta.customerId;
+      if (aiMeta.customerName) document.customerName = aiMeta.customerName;
+      if (aiMeta.customerRef) document.customerRef = aiMeta.customerRef;
+      if (aiMeta.facilityNumber) document.facilityNumber = aiMeta.facilityNumber;
+      if (aiMeta.facilityRef) document.facilityRef = aiMeta.facilityRef;
+      if (aiMeta.branch) document.branch = aiMeta.branch;
+      if (aiMeta.branchCode) document.branchCode = aiMeta.branchCode;
+      if (aiMeta.documentDate) document.documentDate = new Date(aiMeta.documentDate);
+      if (aiMeta.executionDate) document.executionDate = new Date(aiMeta.executionDate);
+      if (aiMeta.expiryDate) document.expiryDate = new Date(aiMeta.expiryDate);
+      if (aiMeta.requestingDate) document.requestingDate = new Date(aiMeta.requestingDate);
+      if (aiMeta.accountNumber) document.accountNumber = aiMeta.accountNumber;
+      if (aiMeta.cifNumber) document.cifNumber = aiMeta.cifNumber;
+      if (aiMeta.ifscCode) document.ifscCode = aiMeta.ifscCode;
+      if (aiMeta.accountType) document.accountType = aiMeta.accountType;
+      if (aiMeta.signatory) document.signatory = aiMeta.signatory;
+      if (aiMeta.partner) document.partner = aiMeta.partner;
+      if (aiMeta.typeOfService) document.typeOfService = aiMeta.typeOfService;
+      if (aiMeta.otherBankingMetadata) document.otherBankingMetadata = aiMeta.otherBankingMetadata;
+      document.validationStatus = aiMeta.validationStatus || 'Valid';
+      document.missingMandatoryFields = aiMeta.missingMandatoryFields || [];
+      document.aiClassification = aiMeta.documentType || '';
+      document.aiConfidence = aiMeta.confidence || '';
+      document.aiProcessedAt = new Date();
+      if (aiMeta.suggestedTags && aiMeta.suggestedTags.length > 0 && (!tags || tags.length === 0)) {
+        document.tags = aiMeta.suggestedTags;
+      }
+    }
     
     await document.save();
 
@@ -117,10 +193,91 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
     // Check storage limits
     await storageService.checkAndIncrementStorage(req, file.size);
 
+    const geminiKey = req.headers?.['x-gemini-key'] || process.env.GEMINI_API_KEY;
+    const openAiKey = req.headers?.['x-openai-key'] || process.env.OPENAI_API_KEY;
+
     // Extract text from the new file before it gets uploaded/moved
     let extractedText = '';
     if (file && file.path) {
-      extractedText = await extractTextFromFile(file.path, ext);
+      extractedText = await extractTextFromFile(file.path, ext, geminiKey, openAiKey);
+    }
+
+    // AI Classification & Metadata Extraction (non-blocking)
+    let aiMeta = null;
+    try {
+      const textForAI = extractedText || docName;
+      aiMeta = await aiHelper.classifyAndExtractMetadata(
+        textForAI,
+        file.originalname,
+        geminiKey,
+        openAiKey
+      );
+    } catch (aiErr) {
+      console.error('AI classification failed on upload (non-blocking):', aiErr.message);
+    }
+
+    // Determine Approval Workflow based on folder category (General, Legal, Compliance)
+    let requiresLegal = false;
+    let requiresCompliance = false;
+    let requiresReporting = true;
+    let initialApprovalStatus = 'Pending_Reporting_Approval';
+
+    let isConfidential = false;
+    let folderCategory = 'General';
+
+    if (folderId) {
+      const parentFolderDoc = await Folder.findOne({ _id: folderId, tenantId, isDeleted: false });
+      if (parentFolderDoc) {
+        folderCategory = parentFolderDoc.folderCategory || 'General';
+        const folderNameLower = (parentFolderDoc.name || '').toLowerCase();
+        if (
+          parentFolderDoc.folderCategory === 'Legal' || 
+          parentFolderDoc.folderCategory === 'Confidential' ||
+          folderNameLower.includes('legal') ||
+          folderNameLower.includes('confidential')
+        ) {
+          isConfidential = true;
+        }
+
+        if (parentFolderDoc.folderCategory === 'Legal' || folderNameLower.includes('legal')) {
+          requiresLegal = true;
+          folderCategory = 'Legal';
+          initialApprovalStatus = 'Pending_Dual_Approval';
+        } else if (parentFolderDoc.folderCategory === 'Compliance' || folderNameLower.includes('compliance')) {
+          requiresCompliance = true;
+          folderCategory = 'Compliance';
+          initialApprovalStatus = 'Pending_Dual_Approval';
+        }
+      }
+    }
+
+    // Fetch uploader manager's profile to retrieve registered E-Signature
+    let uploaderUser = {};
+    try {
+      if (req.User && userId) {
+        uploaderUser = await req.User.findById(userId) || {};
+      }
+    } catch (uErr) {
+      console.warn('Could not fetch uploader profile for signature:', uErr.message);
+    }
+
+    // Generate 2 (General) or 3 (Legal/Compliance) signature slots
+    const initialSignatures = signatureService.createInitialSignatures(folderCategory, uploaderUser);
+
+    // If PDF file, stamp the manager's initial signature on the LAST PAGE before upload
+    if (ext.toLowerCase() === '.pdf' && file && file.path && fs.existsSync(file.path)) {
+      try {
+        const stampedBytes = await signatureService.stampPdfLastPage(file.path, initialSignatures, {
+          name: docName,
+          id: fileHash ? fileHash.substring(0, 10) : 'DOC-INIT'
+        });
+        if (stampedBytes) {
+          fs.writeFileSync(file.path, stampedBytes);
+          file.size = stampedBytes.length;
+        }
+      } catch (stampErr) {
+        console.error('Initial PDF signature stamping error (non-blocking):', stampErr.message);
+      }
     }
 
     // Upload the file asset
@@ -138,10 +295,70 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
       managerId: userId,
       fileSize: file.size,
       storageUrl: uploadResult.url,
+      isConfidential,
       description,
-      tags,
+      tags: (aiMeta?.suggestedTags?.length > 0 && (!tags || tags.length === 0)) ? aiMeta.suggestedTags : tags,
       extractedText,
-      departmentId: req.user.departmentId || null
+      signatures: initialSignatures,
+      // Security & Deduplication
+      fileHash,
+      isMalwareScanned: true,
+      scanResult: 'Clean',
+      ingestionSource: 'Web UI',
+      departmentId: req.user.departmentId || null,
+      // Maker-Checker Approval Workflow
+      approvalStatus: initialApprovalStatus,
+      approvalWorkflow: {
+        requiresLegal,
+        requiresCompliance,
+        requiresReporting,
+        legalApproval: {
+          status: requiresLegal ? 'Pending' : 'Not_Required',
+          approvedBy: null,
+          approvedAt: null,
+          comments: ''
+        },
+        complianceApproval: {
+          status: requiresCompliance ? 'Pending' : 'Not_Required',
+          approvedBy: null,
+          approvedAt: null,
+          comments: ''
+        },
+        reportingApproval: {
+          status: requiresReporting ? 'Pending' : 'Not_Required',
+          approvedBy: null,
+          approvedAt: null,
+          comments: ''
+        }
+      },
+      // Banking metadata from AI extraction
+      documentType: aiMeta?.documentType !== 'Other' ? (aiMeta?.documentType || '') : '',
+      customerId: aiMeta?.customerId || '',
+      customerName: aiMeta?.customerName || '',
+      customerRef: aiMeta?.customerRef || '',
+      facilityNumber: aiMeta?.facilityNumber || '',
+      facilityRef: aiMeta?.facilityRef || '',
+      branch: aiMeta?.branch || '',
+      branchCode: aiMeta?.branchCode || '',
+      documentDate: aiMeta?.documentDate ? new Date(aiMeta.documentDate) : (aiMeta?.executionDate ? new Date(aiMeta.executionDate) : null),
+      executionDate: aiMeta?.executionDate ? new Date(aiMeta.executionDate) : null,
+      expiryDate: aiMeta?.expiryDate ? new Date(aiMeta.expiryDate) : null,
+      requestingDate: aiMeta?.requestingDate ? new Date(aiMeta.requestingDate) : null,
+      accountNumber: aiMeta?.accountNumber || '',
+      cifNumber: aiMeta?.cifNumber || '',
+      ifscCode: aiMeta?.ifscCode || '',
+      accountType: aiMeta?.accountType || '',
+      signatory: aiMeta?.signatory || '',
+      partner: aiMeta?.partner || '',
+      typeOfService: aiMeta?.typeOfService || '',
+      otherBankingMetadata: aiMeta?.otherBankingMetadata || {},
+      // Mandatory Field Validation
+      validationStatus: aiMeta?.validationStatus || 'Pending',
+      missingMandatoryFields: aiMeta?.missingMandatoryFields || [],
+      // AI classification tracking
+      aiClassification: aiMeta?.documentType || '',
+      aiConfidence: aiMeta?.confidence || '',
+      aiProcessedAt: aiMeta ? new Date() : null,
     });
 
     await document.save();
@@ -151,12 +368,19 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
       await Folder.findByIdAndUpdate(folderId, { $inc: { totalDocuments: 1 } });
     }
 
-    await activityService.logActivity(req, 'Document Uploaded', 'Document', document._id);
+    await activityService.logActivity(
+      req,
+      'Document Uploaded',
+      'Document',
+      document._id,
+      document.name || document.originalFileName,
+      { fileSize: document.fileSize, fileType: document.fileType, documentType: document.documentType }
+    );
     return { document, isNewVersion: false };
   }
 };
 
-const updateDocumentDetails = async (req, docId, name, description, tags) => {
+const updateDocumentDetails = async (req, docId, updatesOrName, legacyDescription, legacyTags) => {
   const Document = req.Document;
   const tenantId = req.user.companySlug;
 
@@ -169,12 +393,58 @@ const updateDocumentDetails = async (req, docId, name, description, tags) => {
   if (!doc) throw new Error('Document not found');
   if (doc.isLocked) throw new Error('Document is locked and cannot be modified');
 
-  if (name) doc.name = name;
-  if (description) doc.description = description;
-  if (tags) doc.tags = tags;
+  let updates = {};
+  if (typeof updatesOrName === 'object' && updatesOrName !== null) {
+    updates = updatesOrName;
+  } else {
+    updates = {
+      name: updatesOrName,
+      description: legacyDescription,
+      tags: legacyTags
+    };
+  }
+
+  if (updates.name !== undefined) doc.name = updates.name;
+  if (updates.description !== undefined) doc.description = updates.description;
+  if (updates.tags !== undefined) doc.tags = updates.tags;
+  if (updates.documentType !== undefined) doc.documentType = updates.documentType;
+  if (updates.customerId !== undefined) doc.customerId = updates.customerId;
+  if (updates.customerName !== undefined) doc.customerName = updates.customerName;
+  if (updates.customerRef !== undefined) doc.customerRef = updates.customerRef;
+  if (updates.accountNumber !== undefined) doc.accountNumber = updates.accountNumber;
+  if (updates.cifNumber !== undefined) doc.cifNumber = updates.cifNumber;
+  if (updates.ifscCode !== undefined) doc.ifscCode = updates.ifscCode;
+  if (updates.facilityNumber !== undefined) doc.facilityNumber = updates.facilityNumber;
+  if (updates.facilityRef !== undefined) doc.facilityRef = updates.facilityRef;
+  if (updates.branch !== undefined) doc.branch = updates.branch;
+  if (updates.branchCode !== undefined) doc.branchCode = updates.branchCode;
+  if (updates.accountType !== undefined) doc.accountType = updates.accountType;
+  if (updates.signatory !== undefined) doc.signatory = updates.signatory;
+  if (updates.partner !== undefined) doc.partner = updates.partner;
+  if (updates.typeOfService !== undefined) doc.typeOfService = updates.typeOfService;
+  if (updates.documentDate !== undefined) doc.documentDate = updates.documentDate ? new Date(updates.documentDate) : null;
+  if (updates.executionDate !== undefined) doc.executionDate = updates.executionDate ? new Date(updates.executionDate) : null;
+  if (updates.expiryDate !== undefined) doc.expiryDate = updates.expiryDate ? new Date(updates.expiryDate) : null;
+  if (updates.requestingDate !== undefined) doc.requestingDate = updates.requestingDate ? new Date(updates.requestingDate) : null;
+  if (updates.isConfidential !== undefined) doc.isConfidential = updates.isConfidential;
+  if (updates.watermarkText !== undefined) doc.watermarkText = updates.watermarkText;
+
+  // Re-evaluate mandatory field compliance
+  if (aiHelper.validateMandatoryFields) {
+    const valResult = aiHelper.validateMandatoryFields(doc);
+    doc.missingMandatoryFields = valResult.missingMandatoryFields;
+    doc.validationStatus = valResult.validationStatus;
+  }
 
   await doc.save();
-  await activityService.logActivity(req, 'Document Updated', 'Document', doc._id);
+  await activityService.logActivity(
+    req,
+    'Document Updated',
+    'Document',
+    doc._id,
+    doc.name || doc.originalFileName,
+    { documentType: doc.documentType, isConfidential: doc.isConfidential }
+  );
   return doc;
 };
 
@@ -282,7 +552,14 @@ const softDeleteDocument = async (req, docId) => {
   });
   await trash.save();
 
-  await activityService.logActivity(req, 'Document Deleted', 'Document', doc._id);
+  await activityService.logActivity(
+    req,
+    'Document Deleted',
+    'Document',
+    doc._id,
+    doc.name || doc.originalFileName,
+    { fileSize: doc.fileSize, fileType: doc.fileType, documentType: doc.documentType }
+  );
 };
 
 const restoreDocument = async (req, docId) => {
@@ -311,7 +588,7 @@ const restoreDocument = async (req, docId) => {
       departmentId: req.user.departmentId || null
     });
     await trashFolder.save();
-    await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id);
+    await activityService.logActivity(req, 'Folder Created', 'Folder', trashFolder._id, trashFolder.name);
   } else if (trashFolder.isDeleted) {
     trashFolder.isDeleted = false;
     trashFolder.deletedAt = null;
@@ -327,7 +604,14 @@ const restoreDocument = async (req, docId) => {
 
   await Trash.deleteOne({ tenantId, resourceType: 'Document', resourceId: doc._id });
 
-  await activityService.logActivity(req, 'Document Restored', 'Document', doc._id);
+  await activityService.logActivity(
+    req,
+    'Document Restored',
+    'Document',
+    doc._id,
+    doc.name || doc.originalFileName,
+    { fileSize: doc.fileSize, fileType: doc.fileType }
+  );
 };
 
 const permanentlyDeleteDocument = async (req, docId) => {
@@ -337,6 +621,9 @@ const permanentlyDeleteDocument = async (req, docId) => {
 
   const doc = await Document.findOne({ _id: docId, tenantId, isDeleted: true });
   if (!doc) throw new Error('Document not found in Trash');
+
+  const docName = doc.name || doc.originalFileName;
+  const docMeta = { fileSize: doc.fileSize, fileType: doc.fileType, documentType: doc.documentType };
 
   // Decrement storage
   await storageService.decrementStorage(req, doc.fileSize);
@@ -352,7 +639,14 @@ const permanentlyDeleteDocument = async (req, docId) => {
   await Document.findByIdAndDelete(doc._id);
   await Trash.deleteOne({ tenantId, resourceType: 'Document', resourceId: doc._id });
 
-  await activityService.logActivity(req, 'Document Permanently Deleted', 'Document', doc._id);
+  await activityService.logActivity(
+    req,
+    'Document Permanently Deleted',
+    'Document',
+    doc._id,
+    docName,
+    docMeta
+  );
 };
 
 const copyDocument = async (req, docId, targetFolderId) => {
@@ -843,20 +1137,15 @@ const restoreVersion = async (req, docId, versionId) => {
 /**
  * Download a file from a remote URL into a temp file, returning the temp path.
  */
-const downloadToTemp = (url) => {
-  return new Promise((resolve, reject) => {
-    const os = require('os');
-    const tmpFile = path.join(os.tmpdir(), `dms_reextract_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-    const file = fs.createWriteStream(tmpFile);
-    const protocol = url.startsWith('https') ? require('https') : require('http');
-    protocol.get(url, (response) => {
-      response.pipe(file);
-      file.on('finish', () => file.close(() => resolve(tmpFile)));
-    }).on('error', (err) => {
-      fs.unlink(tmpFile, () => {});
-      reject(err);
-    });
-  });
+const downloadToTemp = async (url) => {
+  const os = require('os');
+  const tmpFile = path.join(os.tmpdir(), `dms_reextract_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  const buffer = await cloudinaryHelper.fetchRemoteBuffer(url);
+  if (!buffer) {
+    throw new Error('Failed to download remote file to temp');
+  }
+  fs.writeFileSync(tmpFile, buffer);
+  return tmpFile;
 };
 
 /**
@@ -949,6 +1238,7 @@ const backfillAllExtractedText = async (req) => {
 };
 
 module.exports = {
+  extractTextFromFile,
   uploadDocument,
   updateDocumentDetails,
   toggleLockDocument,

@@ -24,18 +24,18 @@ const getRecentItems = async (req, res, next) => {
       docQuery.uploadedBy = req.user.userId;
     }
 
-    // Fetch latest 10 folders
+    // Fetch latest folders
     const folders = await Folder.find(folderQuery)
       .sort({ createdAt: -1 })
-      .limit(10)
+      .limit(200)
       .populate('createdBy', 'name')
       .populate('departmentId', 'name')
       .lean();
 
-    // Fetch latest 10 documents
+    // Fetch latest documents
     const documents = await Document.find(docQuery)
       .sort({ createdAt: -1 })
-      .limit(10)
+      .limit(500)
       .populate('uploadedBy', 'name')
       .populate('departmentId', 'name')
       .lean();
@@ -61,8 +61,7 @@ const getRecentItems = async (req, res, next) => {
 
     // Combine and sort
     const combined = [...formattedFolders, ...formattedDocuments]
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .slice(0, 15); // Return the absolute latest 15 items overall
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     return res.status(200).json({ success: true, data: combined });
   } catch (err) {

@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const activityLogSchema = new mongoose.Schema({
   managerId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
   },
   tenantId: {
@@ -15,23 +16,29 @@ const activityLogSchema = new mongoose.Schema({
   },
   resource: {
     type: String,
-    required: true, // Folder, Document, Share etc.
+    enum: ['Folder', 'Document', 'Share', 'User', 'Auth', 'System'],
+    required: true,
   },
   resourceId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
+    required: false,
+  },
+  resourceName: {
+    type: String,
+    default: '',
+  },
+  details: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
   },
   ipAddress: {
     type: String,
-    default: '',
   },
   browser: {
     type: String,
-    default: '',
   },
   operatingSystem: {
     type: String,
-    default: '',
   }
 }, { timestamps: true });
 

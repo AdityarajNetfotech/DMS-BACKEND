@@ -1,7 +1,7 @@
 const cloudinary = require('cloudinary').v2;
 const logger = require('./logger');
 
-if (process.env.STORAGE_TYPE === 'cloudinary') {
+if (process.env.STORAGE_TYPE === 'cloudinary' || process.env.CLOUDINARY_CLOUD_NAME) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,

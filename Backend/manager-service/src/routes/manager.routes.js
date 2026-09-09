@@ -15,6 +15,10 @@ const searchController = require('../controllers/search.controller');
 const recentController = require('../controllers/recent.controller');
 const archiveController = require('../controllers/archive.controller');
 const aiController = require('../controllers/ai.controller');
+const ingestController = require('../controllers/ingest.controller');
+const approvalController = require('../controllers/approval.controller');
+const activityController = require('../controllers/activity.controller');
+const authenticateApiKey = require('../middlewares/apiKey.middleware');
 
 // Resolve tenant and enforce authorization for all routes
 router.use(tenantResolver);
@@ -22,6 +26,9 @@ router.use(tenantResolver);
 // PUBLIC Endpoints for shared link resolutions (no auth token required to preview/download shared files!)
 router.get('/shares/resolve/:token', managerResolver, shareController.resolveShareLink);
 router.get('/shares/download/:token', managerResolver, shareController.downloadSharedFile);
+
+// Headless Ingestion Gateway for LOS / Core Banking / CRM (Authenticated via System API Key)
+router.post('/ingest/document', authenticateApiKey, managerResolver, upload.single('file'), ingestController.ingestDocument);
 
 // Special Upload Route allowing both Manager, Admin, and Viewer roles
 router.post(
@@ -66,6 +73,10 @@ router.post(
           const folder = await Folder.findOne({ _id: currentId, tenantId, isDeleted: false });
           if (!folder) return false;
           
+          if (folder.isSystemFolder || folder.folderCategory === 'Legal' || folder.folderCategory === 'Compliance' || folder.folderCategory === 'Confidential' || folder.name === 'Legal Documents' || folder.name === 'Compliance Documents' || folder.name === 'Confidential Documents') {
+            return true;
+          }
+
           if (folder.createdBy?.toString() === userId || folder.createdBy?._id?.toString() === userId) {
             return true;
           }
@@ -101,12 +112,14 @@ router.post(
   documentController.uploadDocument
 );
 
-// Enforce login and Manager role for everything else
-router.use(authenticate, authorizeRoles('Manager', 'Tenant Admin'), managerResolver);
+// Enforce login and Manager / Reviewer / Admin / Viewer role for everything else
+router.use(authenticate, authorizeRoles('Manager', 'Tenant Admin', 'Company Admin', 'Admin', 'Super Admin', 'Reporting Manager', 'Legal Team', 'Compliance Team', 'Viewer'), managerResolver);
 
-// Dashboard
+// Dashboard & Activity Logs
 router.get('/dashboard', dashboardController.getDashboardStats);
 router.get('/activity-report', dashboardController.getManagerActivityReport);
+router.get('/activity-logs', activityController.getActivityLogs);
+router.get('/activity-logs/export', activityController.exportActivityLogs);
 
 // Recent Items Route
 router.get('/recent', recentController.getRecentItems);
@@ -128,11 +141,13 @@ router.post('/folders/:id/summarize', aiController.summarizeFolder);
 
 // Documents
 router.post('/documents/:id/summarize', aiController.summarizeDocument);
+router.post('/documents/:id/classify', aiController.classifyDocument);
 router.post('/documents/backfill-text', documentController.backfillExtractedText);
 router.get('/documents/:id', documentController.getDocumentDetails);
 router.get('/documents/:id/download', documentController.downloadDocument);
 router.get('/documents/:id/preview', documentController.previewDocument);
 router.put('/documents/:id', documentController.updateDocument);
+router.post('/documents/:id/save-content', upload.single('file'), documentController.saveDocumentContent);
 router.post('/documents/:id/lock', documentController.lockDocument);
 router.post('/documents/:id/archive', documentController.archiveDocument);
 router.post('/documents/:id/favorite', documentController.favoriteDocument);
@@ -140,9 +155,17 @@ router.delete('/documents/:id', documentController.softDeleteDocument);
 router.post('/documents/:id/copy', documentController.copyDocument);
 router.post('/documents/:id/move', documentController.moveDocument);
 router.get('/documents/:id/versions', documentController.getVersionHistory);
+router.get('/documents/:id/versions/:versionId/preview', documentController.previewVersion);
+router.get('/documents/:id/versions/:versionId/download', documentController.downloadVersion);
 router.post('/documents/:id/versions/:versionId/restore', documentController.restoreDocumentVersion);
-router.post('/documents/:id/convert', documentController.convertDocument);
+router.post('/documents/bulk-zip', upload.single('file'), ingestController.bulkZipIngest);
 router.post('/documents/:id/re-extract', documentController.reExtractDocumentText);
+router.post('/api-keys', ingestController.generateApiKey);
+
+// Approvals & Maker-Checker Workflow
+router.get('/approvals', approvalController.listPendingApprovals);
+router.get('/approvals/stats', approvalController.getApprovalStats);
+router.post('/approvals/:id/decision', approvalController.makeApprovalDecision);
 
 // Trash
 router.get('/trash', trashController.getTrashList);

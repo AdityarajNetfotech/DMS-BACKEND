@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const activityService = require('../services/activity.service');
+const cloudinaryHelper = require('../helpers/cloudinary.helper');
 const { createDocumentShareSchema, createFolderShareSchema } = require('../validators/manager.validator');
 
 const createShareLink = async (req, res, next) => {
@@ -185,14 +186,32 @@ const resolveShareLink = async (req, res, next) => {
       });
     }
 
-    // Handle shared documents — redirect to the actual file
+    // Handle shared documents — stream the actual file
     const doc = await Document.findById(share.documentId).select('-password');
     if (!doc || doc.isDeleted) {
       return res.status(404).json({ success: false, message: 'Document is no longer available' });
     }
 
-    // Redirect the user directly to the file URL so they see the actual file
-    return res.redirect(doc.storageUrl);
+    const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
+    const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
+
+    if (doc.storageUrl.startsWith('/uploads') || doc.storageUrl.startsWith('uploads') || !doc.storageUrl.startsWith('http')) {
+      const filePath = path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl);
+      if (fs.existsSync(filePath)) {
+        res.setHeader('Content-Type', doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'));
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
+        return res.sendFile(filePath);
+      }
+      return res.status(404).json({ success: false, message: 'File asset not found locally' });
+    } else {
+      return cloudinaryHelper.streamRemoteFile(
+        doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        false
+      );
+    }
   } catch (err) { next(err); }
 };
 
@@ -226,14 +245,23 @@ const downloadSharedFile = async (req, res, next) => {
     doc.downloadCount += 1;
     await doc.save();
 
+    const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
+    const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
+
     if (doc.storageUrl.startsWith('/uploads')) {
       const filePath = path.join(__dirname, '../../', doc.storageUrl);
       if (fs.existsSync(filePath)) {
-        return res.download(filePath, doc.originalFileName);
+        return res.download(filePath, docFileName);
       }
       return res.status(404).json({ success: false, message: 'File asset not found locally' });
     } else {
-      return res.redirect(doc.storageUrl);
+      return cloudinaryHelper.streamRemoteFile(
+        doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        true
+      );
     }
   } catch (err) { next(err); }
 };

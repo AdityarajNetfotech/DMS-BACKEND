@@ -2,7 +2,7 @@ const storageService = require('../services/storage.service');
 
 const calculateFolderSize = async (req, folderId) => {
   let size = 0;
-  
+
   // Sum documents size
   const docs = await req.Document.find({ folderId, isDeleted: false });
   docs.forEach(d => { size += d.fileSize; });

@@ -14,7 +14,13 @@ const { errorHandler } = require('./shared/error.handler');
 
 const app = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    frameguard: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false
+  })
+);
 app.use(cors());
 app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 app.use(express.json());

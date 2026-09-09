@@ -88,6 +88,31 @@ const documentSchema = new mongoose.Schema({
     enum: ['Active', 'Archived', 'Locked'],
     default: 'Active',
   },
+  isConfidential: {
+    type: Boolean,
+    default: false,
+  },
+  watermarkText: {
+    type: String,
+    default: '',
+  },
+  signatures: [
+    {
+      slot: { type: String, required: true },
+      role: { type: String, required: true },
+      step: { type: Number, default: 1 },
+      signerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      signerName: { type: String, default: '' },
+      signerEmail: { type: String, default: '' },
+      signature: { type: String, default: '' },
+      signatureType: { type: String, default: '' },
+      signatureFont: { type: String, default: 'Great Vibes' },
+      signatureInitials: { type: String, default: '' },
+      signedAt: { type: Date, default: null },
+      status: { type: String, enum: ['Signed', 'Pending', 'Rejected'], default: 'Pending' },
+      comments: { type: String, default: '' }
+    }
+  ],
   isDeleted: {
     type: Boolean,
     default: false,
