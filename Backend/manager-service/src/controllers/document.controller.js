@@ -122,10 +122,16 @@ const getStampedAndWatermarkedPdf = async (doc, req, isConfidential) => {
 
     // 2. Fetch raw buffer from disk or Cloudinary/remote
     let rawBuffer = null;
-    if (doc.storageUrl && doc.storageUrl.startsWith('/uploads')) {
-      const filePath = path.join(__dirname, '../../', doc.storageUrl);
-      if (fs.existsSync(filePath)) {
-        rawBuffer = fs.readFileSync(filePath);
+    if (doc.storageUrl && (doc.storageUrl.startsWith('/uploads') || doc.storageUrl.startsWith('uploads') || !doc.storageUrl.startsWith('http'))) {
+      const fileName = path.basename(doc.storageUrl);
+      const possiblePaths = [
+        path.join(__dirname, '../../uploads', fileName),
+        path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl),
+        path.join(process.cwd(), 'uploads', fileName)
+      ];
+      let foundPath = possiblePaths.find((p) => fs.existsSync(p));
+      if (foundPath) {
+        rawBuffer = fs.readFileSync(foundPath);
       }
     } else if (doc.storageUrl) {
       rawBuffer = await fetchRemoteBuffer(doc.storageUrl);
@@ -164,7 +170,7 @@ const getStampedAndWatermarkedPdf = async (doc, req, isConfidential) => {
       }
     }
 
-    return finalBuffer;
+    return Buffer.isBuffer(finalBuffer) ? finalBuffer : Buffer.from(finalBuffer);
   } catch (err) {
     console.error('getStampedAndWatermarkedPdf failed:', err);
     return null;
@@ -197,14 +203,15 @@ const downloadDocument = async (req, res, next) => {
     if (isPdf) {
       const stampedBuffer = await getStampedAndWatermarkedPdf(doc, req, isConfidential);
       if (stampedBuffer) {
+        const bufferToSend = Buffer.isBuffer(stampedBuffer) ? stampedBuffer : Buffer.from(stampedBuffer);
         const safeFileName = encodeURIComponent(docFileName);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"; filename*=UTF-8''${safeFileName}`);
-        res.setHeader('Content-Length', stampedBuffer.length);
+        res.setHeader('Content-Length', bufferToSend.length);
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
-        return res.send(stampedBuffer);
+        return res.end(bufferToSend);
       }
     }
 
@@ -249,14 +256,15 @@ const previewDocument = async (req, res, next) => {
     if (isPdf) {
       const stampedBuffer = await getStampedAndWatermarkedPdf(doc, req, isConfidential);
       if (stampedBuffer) {
+        const bufferToSend = Buffer.isBuffer(stampedBuffer) ? stampedBuffer : Buffer.from(stampedBuffer);
         const safeFileName = encodeURIComponent(docFileName);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename="${safeFileName}"; filename*=UTF-8''${safeFileName}`);
-        res.setHeader('Content-Length', stampedBuffer.length);
+        res.setHeader('Content-Length', bufferToSend.length);
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
-        return res.send(stampedBuffer);
+        return res.end(bufferToSend);
       }
     }
 

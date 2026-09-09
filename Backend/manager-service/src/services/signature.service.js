@@ -406,6 +406,32 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   return signatures;
 };
 
+const sanitizePdfText = (font, text) => {
+  if (!text) return '';
+  const normalized = String(text)
+    .replace(/[\u2018\u2019\u201A]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u00A0\u1680\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+
+  if (!font || !font.encodeText) return normalized;
+
+  let safeResult = '';
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    try {
+      font.encodeText(char);
+      safeResult += char;
+    } catch {
+      safeResult += ' ';
+    }
+  }
+  return safeResult;
+};
+
 /**
  * Stamps an official dedicated Full-Page Execution & Multi-Party Signature Certificate
  * as the final page of a PDF document.
@@ -439,6 +465,17 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     // Standard A4 dimensions: 595.28 x 841.89 points
     const certPage = pdfDoc.addPage([595.28, 841.89]);
     const { width, height } = certPage.getSize();
+
+    const drawCertText = (text, options = {}) => {
+      try {
+        const targetFont = options.font || fontRegular;
+        const safeStr = sanitizePdfText(targetFont, text);
+        if (!safeStr) return;
+        certPage.drawText(safeStr, { ...options, font: targetFont });
+      } catch (err) {
+        console.warn('drawCertText warning in certificate:', err.message);
+      }
+    };
 
     const count = signatures.length || 2;
     const allSigned = signatures.length > 0 && signatures.every(s => s.status === 'Signed');
@@ -481,7 +518,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       thickness: 2
     });
 
-    certPage.drawText('OFFICIAL CERTIFICATE OF MULTI-PARTY ELECTRONIC EXECUTION', {
+    drawCertText('OFFICIAL CERTIFICATE OF MULTI-PARTY ELECTRONIC EXECUTION', {
       x: 48,
       y: height - 60,
       size: 12.5,
@@ -489,7 +526,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       color: rgb(1, 1, 1)
     });
 
-    certPage.drawText('AUTHENTICATED DIGITAL SIGNATURE AUDIT TRAIL • DMS TAMPER-EVIDENT VAULT', {
+    drawCertText('AUTHENTICATED DIGITAL SIGNATURE AUDIT TRAIL • DMS TAMPER-EVIDENT VAULT', {
       x: 48,
       y: height - 76,
       size: 7,
@@ -508,7 +545,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       color: execStatusColor
     });
 
-    certPage.drawText(execStatusText, {
+    drawCertText(execStatusText, {
       x: width - 208,
       y: height - 69,
       size: 7,
@@ -530,7 +567,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     });
 
     // Document Name & Verification ID
-    certPage.drawText('DOCUMENT DETAILS & INTEGRITY RECORD', {
+    drawCertText('DOCUMENT DETAILS & INTEGRITY RECORD', {
       x: 45,
       y: metaY + 46,
       size: 7,
@@ -539,7 +576,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     });
 
     const docNameText = `Document: ${(docMeta.name || 'DMS Document').substring(0, 42)}`;
-    certPage.drawText(docNameText, {
+    drawCertText(docNameText, {
       x: 45,
       y: metaY + 30,
       size: 8,
@@ -548,7 +585,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     });
 
     const docIdText = `Verification Ref: ${docMeta.id || 'DOC-SIGN'}`;
-    certPage.drawText(docIdText, {
+    drawCertText(docIdText, {
       x: 45,
       y: metaY + 14,
       size: 7,
@@ -557,7 +594,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     });
 
     const dateStr = `Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    certPage.drawText(dateStr, {
+    drawCertText(dateStr, {
       x: 320,
       y: metaY + 30,
       size: 7.5,
@@ -566,7 +603,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
     });
 
     const countText = `Workflow: ${count} Signer Chain (${count === 3 ? 'Manager + Reporting + Team Lead' : 'Manager + Reporting'})`;
-    certPage.drawText(countText, {
+    drawCertText(countText, {
       x: 320,
       y: metaY + 14,
       size: 7.5,
@@ -610,7 +647,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       });
 
       const slotTitle = `STEP ${i + 1}: ${(sig.slot || sig.role || 'SIGNER').toUpperCase()}`;
-      certPage.drawText(slotTitle, {
+      drawCertText(slotTitle, {
         x: 45,
         y: cardY + cardHeight - 16,
         size: 8,
@@ -620,7 +657,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
 
       // Card Status Badge
       const statusBadge = isSigned ? 'SIGNED & AUTHENTICATED' : 'PENDING APPROVAL';
-      certPage.drawText(statusBadge, {
+      drawCertText(statusBadge, {
         x: width - 180,
         y: cardY + cardHeight - 16,
         size: 7,
@@ -632,7 +669,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       const leftColX = 48;
       const innerY = cardY + cardHeight - 42;
 
-      certPage.drawText(`Signer: ${sig.signerName || (isSigned ? 'Authorized Signer' : 'Required Role')}`, {
+      drawCertText(`Signer: ${sig.signerName || (isSigned ? 'Authorized Signer' : 'Required Role')}`, {
         x: leftColX,
         y: innerY,
         size: 8.5,
@@ -641,7 +678,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       });
 
       if (sig.signerEmail) {
-        certPage.drawText(`Email: ${sig.signerEmail}`, {
+        drawCertText(`Email: ${sig.signerEmail}`, {
           x: leftColX,
           y: innerY - 14,
           size: 7.5,
@@ -651,10 +688,10 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       }
 
       const dateLine = isSigned && sig.signedAt
-        ? `Timestamp: ${new Date(sig.signedAt).toLocaleDateString()} ${new Date(sig.signedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+        ? `Timestamp: ${new Date(sig.signedAt).toLocaleDateString()} ${new Date(sig.signedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
         : 'Status: Awaiting Official Review';
 
-      certPage.drawText(dateLine, {
+      drawCertText(dateLine, {
         x: leftColX,
         y: innerY - 28,
         size: 7.5,
@@ -663,7 +700,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       });
 
       const remarksText = sig.comments ? `Remarks: ${sig.comments.substring(0, 48)}` : (isSigned ? 'Remarks: Approved & Signed from User Profile' : 'Remarks: Pending decision');
-      certPage.drawText(remarksText, {
+      drawCertText(remarksText, {
         x: leftColX,
         y: innerY - 42,
         size: 7,
@@ -716,7 +753,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
             }
           }
         } catch (imgErr) {
-          certPage.drawText(sig.signerName || 'Digital Signature', {
+          drawCertText(sig.signerName || 'Digital Signature', {
             x: sigBoxX + 15,
             y: sigBoxY + sigBoxHeight / 2,
             size: 14,
@@ -751,7 +788,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
             throw new Error('Empty remote buffer');
           }
         } catch {
-          certPage.drawText(sig.signerName || 'Digital Signature', {
+          drawCertText(sig.signerName || 'Digital Signature', {
             x: sigBoxX + 15,
             y: sigBoxY + sigBoxHeight / 2,
             size: 14,
@@ -760,7 +797,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
           });
         }
       } else if (isSigned) {
-        certPage.drawText(sig.signerName || 'Authorized Signer', {
+        drawCertText(sig.signerName || 'Authorized Signer', {
           x: sigBoxX + 15,
           y: sigBoxY + sigBoxHeight / 2,
           size: 14,
@@ -768,7 +805,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
           color: rgb(0.04, 0.17, 0.53)
         });
       } else {
-        certPage.drawText('— Awaiting Decision & Signature —', {
+        drawCertText('— Awaiting Decision & Signature —', {
           x: sigBoxX + 12,
           y: sigBoxY + sigBoxHeight / 2,
           size: 7.5,
@@ -779,7 +816,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
 
       // Security Seal text at bottom of signature box
       if (isSigned) {
-        certPage.drawText('AUTHENTICATED VIA USER PROFILE', {
+        drawCertText('AUTHENTICATED VIA USER PROFILE', {
           x: sigBoxX + 22,
           y: sigBoxY + 4,
           size: 5.5,
@@ -801,7 +838,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
       borderWidth: 0.75
     });
 
-    certPage.drawText('LEGAL COMPLIANCE & TAMPER-EVIDENT AUDIT DECLARATION:', {
+    drawCertText('LEGAL COMPLIANCE & TAMPER-EVIDENT AUDIT DECLARATION:', {
       x: 45,
       y: footerY + 36,
       size: 6.5,
@@ -811,11 +848,11 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
 
     const decl1 = 'This Certificate of Electronic Execution is an official integral part of the attached document. All signatures displayed above';
     const decl2 = 'have been authenticated via verified user profiles and stamped in full compliance with Digital Signature & E-Governance regulations.';
-    certPage.drawText(decl1, { x: 45, y: footerY + 24, size: 6, font: fontRegular, color: rgb(0.35, 0.4, 0.45) });
-    certPage.drawText(decl2, { x: 45, y: footerY + 14, size: 6, font: fontRegular, color: rgb(0.35, 0.4, 0.45) });
+    drawCertText(decl1, { x: 45, y: footerY + 24, size: 6, font: fontRegular, color: rgb(0.35, 0.4, 0.45) });
+    drawCertText(decl2, { x: 45, y: footerY + 14, size: 6, font: fontRegular, color: rgb(0.35, 0.4, 0.45) });
 
     const hashStr = docMeta.fileHash ? `SHA-256: ${docMeta.fileHash.substring(0, 28)}...` : 'DMS Cryptographic Verification Hash Active';
-    certPage.drawText(hashStr, {
+    drawCertText(hashStr, {
       x: 45,
       y: footerY + 4,
       size: 5.5,
@@ -825,7 +862,7 @@ const stampPdfLastPage = async (pdfBufferOrPath, signatures = [], docMeta = {}) 
 
     pdfDoc.setProducer('DMS-MultiParty-Signature-Certificate');
     const savedBytes = await pdfDoc.save();
-    return savedBytes;
+    return Buffer.from(savedBytes);
   } catch (err) {
     console.error('PDF certificate page stamping failed:', err);
     return null;
