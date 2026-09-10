@@ -43,8 +43,8 @@ const extractTextFromFile = async (filePath, ext, geminiKey, openAiKey) => {
     } else if (['JPG', 'JPEG', 'PNG', 'TIFF', 'TIF', 'WEBP', 'BMP'].includes(fileTypeUpper)) {
       const imgMime = fileTypeUpper === 'PNG' ? 'image/png'
         : ['TIFF', 'TIF'].includes(fileTypeUpper) ? 'image/tiff'
-        : fileTypeUpper === 'WEBP' ? 'image/webp'
-        : 'image/jpeg';
+          : fileTypeUpper === 'WEBP' ? 'image/webp'
+            : 'image/jpeg';
       console.log(`Performing OCR on uploaded ${fileTypeUpper} image...`);
       return await aiHelper.ocrWithGemini(rawBuffer, imgMime, geminiKey, openAiKey);
     } else if (['XLSX', 'PPTX'].includes(fileTypeUpper)) {
@@ -184,7 +184,7 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
         document.tags = aiMeta.suggestedTags;
       }
     }
-    
+
     await document.save();
 
     await activityService.logActivity(req, 'Document Version Updated', 'Document', document._id);
@@ -231,7 +231,7 @@ const uploadDocument = async (req, folderId, file, name, description, tags = [])
         folderCategory = parentFolderDoc.folderCategory || 'General';
         const folderNameLower = (parentFolderDoc.name || '').toLowerCase();
         if (
-          parentFolderDoc.folderCategory === 'Legal' || 
+          parentFolderDoc.folderCategory === 'Legal' ||
           parentFolderDoc.folderCategory === 'Confidential' ||
           folderNameLower.includes('legal') ||
           folderNameLower.includes('confidential')
@@ -740,7 +740,7 @@ const createWordDocxBuffer = (originalName, textContent) => {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
   const escapedText = escapeXml(textContent);
-  const paragraphs = escapedText.split('\n').map(line => 
+  const paragraphs = escapedText.split('\n').map(line =>
     `<w:p><w:r><w:t>${line}</w:t></w:r></w:p>`
   ).join('');
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -799,7 +799,7 @@ const createExcelXlsxBuffer = (originalName, textContent) => {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 </Relationships>`;
   const escapedText = escapeXml(textContent);
-  const rows = escapedText.split('\n').map((line, idx) => 
+  const rows = escapedText.split('\n').map((line, idx) =>
     `<row r="${idx + 5}"><c r="A${idx + 5}" t="inlineStr"><is><t>${line}</t></is></c></row>`
   ).join('');
   const sheet1Xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1127,7 +1127,7 @@ const restoreVersion = async (req, docId, versionId) => {
   doc.storageUrl = oldVersion.storageUrl;
   doc.uploadedBy = userId;
   doc.description = `Restored to version v${oldVersion.versionNumber}.0`;
-  
+
   await doc.save();
 
   await activityService.logActivity(req, 'Document Version Restored', 'Document', doc._id);
@@ -1177,7 +1177,7 @@ const reExtractTextForDocument = async (req, docId) => {
       extractedText = await extractTextFromFile(tmpPath, ext);
     } finally {
       if (tmpPath && fs.existsSync(tmpPath)) {
-        fs.unlink(tmpPath, () => {});
+        fs.unlink(tmpPath, () => { });
       }
     }
   }
@@ -1220,7 +1220,7 @@ const backfillAllExtractedText = async (req) => {
           extractedText = await extractTextFromFile(tmpPath, ext);
         } finally {
           if (tmpPath && fs.existsSync(tmpPath)) {
-            fs.unlink(tmpPath, () => {});
+            fs.unlink(tmpPath, () => { });
           }
         }
       }

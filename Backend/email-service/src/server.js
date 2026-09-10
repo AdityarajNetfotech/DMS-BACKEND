@@ -21,7 +21,7 @@ const transporter = nodemailer.createTransport({
 app.post('/api/email/welcome', async (req, res, next) => {
   try {
     const { email, role, companyName, companySlug, tempPassword, loginUrl } = req.body;
-    
+
     console.log('Sending email to:', email);
 
     const html = `
@@ -101,7 +101,7 @@ app.post('/api/email/welcome', async (req, res, next) => {
 app.post('/api/email/reply', async (req, res, next) => {
   try {
     const { email, subject, message, replyFrom = "Aditya <aditya@netfotech.in>" } = req.body;
-    
+
     console.log('Sending reply email to:', email);
 
     const html = `
@@ -152,7 +152,7 @@ app.post('/api/email/reply', async (req, res, next) => {
 app.post('/api/email/forgot-password', async (req, res, next) => {
   try {
     const { email, companyName, otp } = req.body;
-    
+
     console.log('Sending OTP email to:', email);
 
     const html = `
@@ -178,7 +178,7 @@ app.post('/api/email/forgot-password', async (req, res, next) => {
 app.post('/api/email/folder-shared-upload', async (req, res, next) => {
   try {
     const { email, managerName, folderName, companyName, portalUrl } = req.body;
-    
+
     console.log('Sending Folder Share Upload notification to:', email);
 
     const html = `
