@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: ./api-gateway/Dockerfile
     ports:
-      - "9005:3000"
+      - "${GATEWAY_PORT:-9005}:3000"
     env_file: .env
     depends_on:
       - auth-service
