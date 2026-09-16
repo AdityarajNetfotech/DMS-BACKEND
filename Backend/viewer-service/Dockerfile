@@ -4,6 +4,7 @@ WORKDIR /usr/src/app
 
 COPY viewer-service/package*.json ./
 
+RUN apk add --no-cache python3 make g++
 RUN npm install
 
 COPY viewer-service/src ./src

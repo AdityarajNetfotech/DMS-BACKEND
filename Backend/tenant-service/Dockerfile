@@ -1,6 +1,7 @@
 FROM node:18-alpine
 WORKDIR /usr/src/app
 COPY tenant-service/package*.json ./
+RUN apk add --no-cache python3 make g++
 RUN npm install
 COPY tenant-service/src ./src
 COPY shared ./src/shared
