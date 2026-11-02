@@ -1,4 +1,7 @@
 
+const https = require('https');
+const http = require('http');
+
 function safeFetchJson(url, headers = {}) {
   return new Promise((resolve, reject) => {
     try {
@@ -36,8 +39,6 @@ function safeFetchJson(url, headers = {}) {
     }
   });
 }
-const https = require('https');
-const http = require('http');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -259,9 +260,21 @@ router.post('/sso-exchange', tenantResolver, async (req, res, next) => {
     }
 
     const slug = req.params?.companySlug || req.tenant?.companySlug;
+
+    // Extract direct IP gateway if vcOrigin is an IP or nip.io domain
+    let directIpGateway = null;
+    if (vcOrigin) {
+      const match = vcOrigin.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+      if (match) {
+        directIpGateway = `http://${match[1]}:5000`;
+      }
+    }
+
     const candidateUrls = [
       process.env.VC_GATEWAY_URL,
       process.env.VC_AUTH_SERVICE_URL,
+      directIpGateway,
+      'http://103.192.198.240:5000',
       vcOrigin,
       slug ? `https://${slug}.intellinexa.in` : null,
       'https://intellinexa.in',
