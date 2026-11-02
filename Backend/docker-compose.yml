@@ -1,10 +1,17 @@
+name: dms
+
 services:
   api-gateway:
     build:
       context: .
       dockerfile: ./api-gateway/Dockerfile
     ports:
-      - "${GATEWAY_PORT:-9005}:3000"
+      - "3000:3000"
+      - "9005:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./api-gateway/src:/usr/src/app/src
     env_file: .env
     depends_on:
       - auth-service
@@ -21,6 +28,11 @@ services:
       dockerfile: ./auth-service/Dockerfile
     expose:
       - "3002"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./auth-service/src:/usr/src/app/src
+      - ./shared:/usr/src/app/src/shared
     env_file: .env
     restart: unless-stopped
 
@@ -39,6 +51,9 @@ services:
       dockerfile: ./tenant-service/Dockerfile
     expose:
       - "3003"
+    volumes:
+      - ./tenant-service/src:/usr/src/app/src
+      - ./shared:/usr/src/app/src/shared
     env_file: .env
     restart: unless-stopped
 
@@ -48,6 +63,11 @@ services:
       dockerfile: ./user-service/Dockerfile
     expose:
       - "3004"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./user-service/src:/usr/src/app/src
+      - ./shared:/usr/src/app/src/shared
     env_file: .env
     restart: unless-stopped
 
@@ -66,8 +86,12 @@ services:
       dockerfile: ./manager-service/Dockerfile
     expose:
       - "3006"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: .env
     volumes:
+      - ./manager-service/src:/usr/src/app/src
+      - ./shared:/usr/src/app/src/shared
       - manager-uploads:/usr/src/app/uploads
     restart: unless-stopped
 

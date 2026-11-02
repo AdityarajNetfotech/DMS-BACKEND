@@ -70,6 +70,34 @@ const folderSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  caseRef: {
+    type: String,
+    default: null,
+  },
+  assignedEmail: {
+    type: String,
+    default: null,
+  },
+  creatorEmail: {
+    type: String,
+    default: null,
+  },
+  creatorRole: {
+    type: String,
+    default: null,
+  },
+  isAuditorFolder: {
+    type: Boolean,
+    default: false,
+  },
+  allowedEmails: {
+    type: [String],
+    default: [],
+  },
+  allowedNames: {
+    type: [String],
+    default: [],
+  },
   deletedAt: {
     type: Date,
     default: null,

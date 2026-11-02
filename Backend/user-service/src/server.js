@@ -18,11 +18,29 @@ router.use(tenantResolver);
 router.use(authenticate);
 
 // Get profile of current user
+// Helper to format VerifyChain role slug to a clean, user-facing role title
+const formatVcRole = (rawRole) => {
+  if (!rawRole) return 'Manager';
+  const r = String(rawRole).toLowerCase().trim().replace(/[-_]/g, ' ');
+  if (r === 'auditor') return 'Auditor';
+  if (r === 'business user' || r === 'business_user') return 'Business User';
+  if (r === 'compliance officer' || r === 'compliance_officer' || r === 'compliance user') return 'Compliance Officer';
+  if (r === 'company admin' || r === 'company_admin') return 'Company Admin';
+  if (r === 'super admin' || r === 'superadmin') return 'Super Admin';
+  return r.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+};
+
+// Get profile of current user
 router.get('/profile', async (req, res, next) => {
   try {
     const user = await req.User.findById(req.user.userId).select('-password');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.status(200).json({ success: true, data: user });
+    const userObj = user.toObject();
+    userObj.displayRole = formatVcRole(userObj.vcRole || userObj.role);
+    if (userObj.name) {
+      userObj.name = userObj.name.charAt(0).toUpperCase() + userObj.name.slice(1);
+    }
+    res.status(200).json({ success: true, data: userObj });
   } catch (err) { next(err); }
 });
 

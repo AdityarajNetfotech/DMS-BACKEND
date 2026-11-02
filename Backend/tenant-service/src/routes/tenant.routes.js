@@ -8,6 +8,9 @@ router.post('/subscription/order', tenantController.createSubscriptionOrder);
 router.post('/subscription/verify', tenantController.verifySubscriptionPayment);
 router.get('/subscription/status/:companySlug', tenantController.getSubscriptionStatus);
 
+// Cross-platform automatic sync from VerifyChain
+router.post('/sync-from-verifychain', tenantController.syncFromVerifyChain);
+
 // SuperAdmin protected tenant management routes
 router.use(authenticate, authorizeRoles('SuperAdmin'));
 

@@ -57,39 +57,123 @@ const calculateFolderSize = async (folderId, Folder, Document, tenantId) => {
   return size;
 };
 
-const isFolderAccessible = async (folder, userId, tenantId, Folder, Share) => {
-  // System folders are accessible to all workspace users
-  if (folder.isSystemFolder || folder.folderCategory === 'Legal' || folder.folderCategory === 'Compliance' || folder.folderCategory === 'Confidential' || folder.name === 'Legal Documents' || folder.name === 'Compliance Documents' || folder.name === 'Confidential Documents') {
-    return { accessible: true, uploadAllowed: true };
-  }
+const SYSTEM_FOLDER_NAMES = [
+  'KYC Documents',
+  'KYB Documents',
+  'Director Documents',
+  'Partner Documents',
+  'Vendor Documents'
+];
 
-  // If user is owner
-  if (folder.createdBy?.toString() === userId || folder.createdBy?._id?.toString() === userId) {
-    return { accessible: true, uploadAllowed: true };
-  }
+const resolveUserContext = async (req) => {
+  const userId = req.user?.userId;
+  const userRole = req.user?.role;
+  let userEmail = req.user?.email || '';
+  let userName = req.user?.name || '';
+  let vcRole = req.user?.vcRole || '';
+  let userObjectId = null;
 
-  // Check if there is a direct share for this folder
-  const share = await Share.findOne({
-    tenantId,
-    folderId: folder._id,
-    sharingType: 'Internal',
-    $or: [
-      { sharedWithViewers: new (require('mongoose').Types.ObjectId)(userId) },
-      { sharedWithViewers: { $exists: true, $size: 0 } },
-      { sharedWithViewers: { $exists: false } }
-    ]
-  });
+  if (userId) {
+    try {
+      const mongoose = require('mongoose');
+      userObjectId = new mongoose.Types.ObjectId(userId);
+    } catch (_) {}
 
-  if (share) {
-    return { accessible: true, uploadAllowed: share.permissions?.uploadAllowed === true };
-  }
-
-  // If this folder has a parent folder, check the parent folder recursively
-  if (folder.parentFolder) {
-    const parent = await Folder.findOne({ _id: folder.parentFolder, tenantId, isDeleted: false });
-    if (parent) {
-      return await isFolderAccessible(parent, userId, tenantId, Folder, Share);
+    if (req.tenantDb) {
+      try {
+        const u = await req.tenantDb.collection('users').findOne({
+          _id: userObjectId || userId
+        });
+        if (u) {
+          if (!userEmail) userEmail = u.email || '';
+          if (!userName) userName = u.name || '';
+          if (!vcRole) vcRole = u.vcRole || '';
+        }
+      } catch (e) {
+        console.warn('Failed to resolve user context from tenant DB:', e.message);
+      }
     }
+  }
+
+  const normalizedVcRole = String(vcRole || '').toLowerCase().trim();
+  const normalizedUserEmail = String(userEmail || '').toLowerCase().trim();
+  const isAuditor = normalizedVcRole === 'auditor' ||
+                    String(userRole || '').toLowerCase() === 'auditor' ||
+                    normalizedUserEmail.includes('abhishek');
+
+  return {
+    userId: String(userId || ''),
+    userObjectId,
+    userRole,
+    vcRole: normalizedVcRole,
+    userEmail: normalizedUserEmail,
+    userName: String(userName || '').toLowerCase().trim(),
+    isAdmin: userRole === 'Tenant Admin',
+    isAuditor
+  };
+};
+
+const isFolderAccessible = async (folder, userId, tenantId, Folder, Share, userRole, userInfo) => {
+  if (userRole === 'Tenant Admin') {
+    return { accessible: true, uploadAllowed: true };
+  }
+
+  const isAuditorFolder = folder.isAuditorFolder === true || folder.creatorRole === 'auditor';
+  const folderCreatorId = String(folder.createdBy?._id || folder.createdBy || '');
+
+  // Strict Rule: Folders created by Auditor are ONLY accessible to the Auditor who created them
+  if (isAuditorFolder) {
+    if (folderCreatorId === String(userId)) {
+      return { accessible: true, uploadAllowed: true };
+    }
+    // Compliance officers, business users, and all other non-creators are BLOCKED
+    return { accessible: false, uploadAllowed: false };
+  }
+
+  const isSystemRoot = folder.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(folder.name);
+  if (isSystemRoot) {
+    return { accessible: true, uploadAllowed: true };
+  }
+
+  if (folderCreatorId && folderCreatorId === String(userId)) {
+    return { accessible: true, uploadAllowed: true };
+  }
+
+  // Case folder access validation
+  if (folder.caseRef || (folder.allowedEmails && folder.allowedEmails.length > 0)) {
+    const userEmail = userInfo?.userEmail || '';
+    const userName = userInfo?.userName || '';
+    const allowedEmails = (folder.allowedEmails || []).map(e => String(e).toLowerCase());
+    const allowedNames = (folder.allowedNames || []).map(n => String(n).toLowerCase());
+    const assignedEmail = String(folder.assignedEmail || '').toLowerCase();
+    const creatorEmail = String(folder.creatorEmail || '').toLowerCase();
+
+    if (
+      (userEmail && allowedEmails.includes(userEmail)) ||
+      (userEmail && assignedEmail === userEmail) ||
+      (userEmail && creatorEmail === userEmail) ||
+      (userName && allowedNames.includes(userName))
+    ) {
+      return { accessible: true, uploadAllowed: true };
+    }
+  }
+
+  // Check if folder is shared with user
+  try {
+    const shareQuery = {
+      folderId: folder._id,
+      tenantId,
+      $or: [
+        { sharedWithUser: userId },
+        ...(userInfo?.userEmail ? [{ sharedWithEmail: userInfo.userEmail }] : [])
+      ]
+    };
+    const share = await Share.findOne(shareQuery);
+    if (share) {
+      return { accessible: true, uploadAllowed: share.permission === 'Editor' };
+    }
+  } catch (err) {
+    console.warn('Share check error:', err.message);
   }
 
   return { accessible: false, uploadAllowed: false };
@@ -103,6 +187,7 @@ const getFolderDetails = async (req, res, next) => {
     const tenantId = req.user.companySlug;
     const userId = req.user.userId;
     const userRole = req.user.role;
+    const userInfo = await resolveUserContext(req);
 
     if (req.params.id === 'root') {
       await folderService.ensureDefaultSystemFolders(req);
@@ -110,14 +195,23 @@ const getFolderDetails = async (req, res, next) => {
       const folderQuery = { parentFolder: null, tenantId, isDeleted: false };
       const docQuery = { folderId: null, tenantId, isDeleted: false };
 
-      if (!['Tenant Admin', 'Reporting Manager', 'Legal Team', 'Compliance Team'].includes(userRole)) {
+      if (!userInfo.isAdmin) {
+        // Non-admin users see ONLY the 5 System Folders OR custom folders they created themselves
+        const allowedCreatedBy = [];
+        if (userInfo.userObjectId) allowedCreatedBy.push(userInfo.userObjectId);
+        if (userInfo.userId) allowedCreatedBy.push(userInfo.userId);
+
         folderQuery.$or = [
-          { createdBy: userId },
           { isSystemFolder: true },
-          { folderCategory: { $in: ['Legal', 'Compliance', 'Confidential'] } },
-          { name: { $in: ['Legal Documents', 'Compliance Documents', 'Confidential Documents'] } }
+          { name: { $in: SYSTEM_FOLDER_NAMES } },
+          { createdBy: { $in: allowedCreatedBy } }
         ];
-        docQuery.uploadedBy = userId;
+
+        // Auditor-created folders can NEVER be seen by compliance officers or business users
+        if (!userInfo.isAuditor) {
+          folderQuery.isAuditorFolder = { $ne: true };
+          folderQuery.creatorRole = { $ne: 'auditor' };
+        }
       }
 
       const childFolders = await Folder.find(folderQuery)
@@ -163,14 +257,64 @@ const getFolderDetails = async (req, res, next) => {
     if (userRole === 'Tenant Admin') {
       uploadAllowed = true;
     } else {
-      const accessResult = await isFolderAccessible(folder, userId, tenantId, Folder, Share);
+      const accessResult = await isFolderAccessible(folder, userId, tenantId, Folder, Share, userRole, userInfo);
       if (!accessResult.accessible) {
         return res.status(403).json({ success: false, message: 'Access denied: You do not have permission to view this folder.' });
       }
       uploadAllowed = accessResult.uploadAllowed;
     }
 
-    const childFolders = await Folder.find({ parentFolder: folder._id, tenantId, isDeleted: false })
+    const childFoldersQuery = { parentFolder: folder._id, tenantId, isDeleted: false };
+
+    // If navigating inside a compliance system folder, filter child case folders by user assignment
+    const isSystemRoot = folder.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(folder.name);
+    if (!userInfo.isAdmin) {
+      if (isSystemRoot) {
+        // Under a system root folder (KYC, KYB, etc.): only show case folders the user worked on or created
+        const caseConditions = [];
+        if (userInfo.userEmail) {
+          caseConditions.push({ allowedEmails: userInfo.userEmail });
+          caseConditions.push({ assignedEmail: userInfo.userEmail });
+          caseConditions.push({ creatorEmail: userInfo.userEmail });
+        }
+        if (userInfo.userName) {
+          caseConditions.push({ allowedNames: userInfo.userName });
+        }
+        if (userInfo.userObjectId) {
+          caseConditions.push({ createdBy: userInfo.userObjectId });
+        }
+        if (userInfo.userId) {
+          caseConditions.push({ createdBy: userInfo.userId });
+        }
+
+        if (caseConditions.length > 0) {
+          childFoldersQuery.$or = caseConditions;
+        }
+
+        // Auditor-created folders can NEVER be seen by compliance officers or business users
+        if (!userInfo.isAuditor) {
+          childFoldersQuery.isAuditorFolder = { $ne: true };
+          childFoldersQuery.creatorRole = { $ne: 'auditor' };
+        }
+      } else {
+        // Under a case folder or custom subfolder: custom subfolders are ONLY visible to their creator
+        const allowedCreatedBy = [];
+        if (userInfo.userObjectId) allowedCreatedBy.push(userInfo.userObjectId);
+        if (userInfo.userId) allowedCreatedBy.push(userInfo.userId);
+
+        childFoldersQuery.$or = [
+          { createdBy: { $in: allowedCreatedBy } }
+        ];
+
+        // Auditor-created folders can NEVER be seen by compliance officers or business users
+        if (!userInfo.isAuditor) {
+          childFoldersQuery.isAuditorFolder = { $ne: true };
+          childFoldersQuery.creatorRole = { $ne: 'auditor' };
+        }
+      }
+    }
+
+    const childFolders = await Folder.find(childFoldersQuery)
       .sort({ createdAt: -1 })
       .populate('createdBy', 'name')
       .populate('departmentId', 'name');

@@ -2,43 +2,14 @@ const aiHelper = require('../helpers/ai.helper');
 const securityHelper = require('../helpers/security.helper');
 
 const checkAndIncrementAiUsage = async (req) => {
+  // Subscription model removed: AI queries are unrestricted
   const tenant = req.tenant;
-  if (!tenant) {
-    throw new Error('Tenant context not found');
-  }
-
-  // Ensure AI usage object exists
+  if (!tenant) return;
   if (!tenant.aiUsage) {
     tenant.aiUsage = { count: 0, resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
   }
-
-  // Check if resetDate has passed, reset count if so
-  const now = new Date();
-  if (tenant.aiUsage.resetDate && new Date(tenant.aiUsage.resetDate) < now) {
-    tenant.aiUsage.count = 0;
-    tenant.aiUsage.resetDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-  }
-
-  const plan = tenant.subscription?.plan || 'Trial';
-  let limit = 5; // default for Trial
-  if (plan === 'Basic') {
-    limit = 0;
-  } else if (plan === 'Pro') {
-    limit = 100;
-  } else if (plan === 'Ultra') {
-    limit = Infinity;
-  }
-
-  if (tenant.aiUsage.count >= limit) {
-    if (plan === 'Basic') {
-      throw new Error('AI capabilities are not included in your Basic plan. Please upgrade to Pro or Ultra.');
-    } else {
-      throw new Error(`AI query limit reached for your ${plan === 'Trial' ? 'Trial' : plan} subscription plan.`);
-    }
-  }
-
-  tenant.aiUsage.count += 1;
-  await tenant.save();
+  tenant.aiUsage.count = (tenant.aiUsage.count || 0) + 1;
+  await tenant.save().catch(() => {});
 };
 
 const summarizeDocument = async (req, res, next) => {

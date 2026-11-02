@@ -430,34 +430,136 @@ const getSubscriptionStatus = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Tenant workspace not found.' });
     }
 
-    const regDate = tenant.registrationDate || tenant.createdAt;
-    const trialEndsAt = regDate ? new Date(new Date(regDate).getTime() + 7 * 24 * 60 * 60 * 1000) : tenant.trialEndsAt;
-
-    const now = new Date();
-    const trialEnded = trialEndsAt && new Date(trialEndsAt) < now;
-    const planExpired = tenant.subscription.expiresAt && new Date(tenant.subscription.expiresAt) < now;
-
-    let isAccessLocked = false;
-    if (tenant.subscription.plan === 'Trial' && trialEnded) {
-      isAccessLocked = true;
-    } else if (tenant.subscription.plan !== 'Trial' && planExpired) {
-      isAccessLocked = true;
-    }
-
+    // Subscription model removed: always active and unlocked
     res.status(200).json({
       success: true,
-      trialEndsAt: trialEndsAt,
-      trialEnded,
-      planExpired,
-      isAccessLocked,
-      subscription: tenant.subscription,
-      aiUsage: tenant.aiUsage || { count: 0 }
+      trialEndsAt: null,
+      trialEnded: false,
+      planExpired: false,
+      isAccessLocked: false,
+      subscription: { plan: 'Enterprise', status: 'Active' },
+      aiUsage: { count: 0, limit: Infinity }
     });
   } catch (err) {
     next(err);
   }
 };
 
+const syncFromVerifyChain = async (req, res, next) => {
+  try {
+    const {
+      companyName,
+      companySlug,
+      companyCode,
+      adminEmail,
+      adminName,
+      adminPhone,
+      phone,
+      gstNumber,
+      panNumber,
+      cinNumber,
+      registrationCode,
+      industry,
+      website,
+      logo
+    } = req.body;
+
+    if (!companyName || !companySlug) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyName and companySlug are required'
+      });
+    }
+
+    const safeSlug = companySlug.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+    // 1. Check if tenant already exists in Master DB
+    let tenant = await Tenant.findOne({ companySlug: safeSlug });
+    if (tenant) {
+      return res.status(200).json({
+        success: true,
+        message: `Tenant '${safeSlug}' already registered in DMS Master DB`,
+        tenant: {
+          id: tenant._id,
+          companySlug: tenant.companySlug,
+          companyName: tenant.companyName
+        }
+      });
+    }
+
+    // 2. Build tenant database URI
+    const masterUri = process.env.MONGO_MASTER_URI || 'mongodb://localhost:27017/dms_master';
+    const baseUri = masterUri.split('?')[0].replace(/\/[^/]+$/, '');
+    const queryParams = masterUri.includes('?') ? '?' + masterUri.split('?')[1] : '';
+    const tenantDbUri = `${baseUri}/tenant_${safeSlug.replace(/-/g, '_')}${queryParams}`;
+
+    const safeCode = (companyCode || registrationCode || safeSlug)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 8) || 'TENANT';
+
+    // 3. Create Tenant document in Master DB with Enterprise plan
+    tenant = new Tenant({
+      companyName,
+      companySlug: safeSlug,
+      companyCode: safeCode,
+      adminEmail: adminEmail || `admin@${safeSlug}.com`,
+      adminName: adminName || companyName + ' Admin',
+      adminMobile: adminPhone || phone || '',
+      phone: phone || '',
+      gstNumber: gstNumber || '',
+      panNumber: panNumber || '',
+      registrationNumber: registrationCode || cinNumber || '',
+      industryType: industry || '',
+      website: website || '',
+      logo: logo || '',
+      dbUri: tenantDbUri,
+      isActive: true,
+      subscription: {
+        plan: 'Enterprise',
+        status: 'Active',
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+      }
+    });
+
+    await tenant.save();
+
+    // 4. Provision tenant DB and seed admin user
+    try {
+      const tenantDb = await getTenantConnection(safeSlug, tenantDbUri);
+      const User = tenantDb.model('User', userSchema);
+
+      const existingUser = await User.findOne({ email: tenant.adminEmail });
+      if (!existingUser) {
+        const generatedPassword = crypto.randomBytes(16).toString('hex') + 'A1!';
+        const newUser = new User({
+          name: tenant.adminName || companyName + ' Admin',
+          email: tenant.adminEmail,
+          password: generatedPassword,
+          role: 'Manager',
+          status: 'Active',
+          mustChangePassword: false
+        });
+        await newUser.save();
+      }
+    } catch (seedErr) {
+      console.warn(`[DMS Sync] Tenant master created, but DB user seed deferred: ${seedErr.message}`);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `Tenant '${safeSlug}' successfully synchronized and provisioned in DMS`,
+      tenant: {
+        id: tenant._id,
+        companySlug: tenant.companySlug,
+        companyName: tenant.companyName,
+        companyCode: tenant.companyCode
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 module.exports = {
   createTenant,
   getAllTenants,
@@ -466,5 +568,6 @@ module.exports = {
   deleteTenant,
   createSubscriptionOrder,
   verifySubscriptionPayment,
-  getSubscriptionStatus
+  getSubscriptionStatus,
+  syncFromVerifyChain
 };

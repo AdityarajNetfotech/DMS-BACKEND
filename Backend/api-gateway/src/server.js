@@ -20,59 +20,50 @@ app.use(morgan('dev'));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  validate: { trustProxy: false, xForwardedForHeader: false },
   max: process.env.NODE_ENV === 'production' ? 100 : 10000, // Safe high limit for local development
 });
 app.use(limiter);
 
-// Dynamic proxy handler that forwards full paths to internal microservices
+// Pre-configured microservice proxies
+const superAdminProxy = createProxyMiddleware({ target: process.env.SUPER_ADMIN_SERVICE_URL || 'http://super-admin-service:3001', changeOrigin: true });
+const tenantProxy = createProxyMiddleware({ target: process.env.TENANT_SERVICE_URL || 'http://tenant-service:3003', changeOrigin: true });
+const authProxy = createProxyMiddleware({ target: process.env.AUTH_SERVICE_URL || 'http://auth-service:3002', changeOrigin: true });
+const userProxy = createProxyMiddleware({ target: process.env.USER_SERVICE_URL || 'http://user-service:3004', changeOrigin: true });
+const managerProxy = createProxyMiddleware({ target: process.env.MANAGER_SERVICE_URL || 'http://manager-service:3006', changeOrigin: true });
+const viewerProxy = createProxyMiddleware({ target: process.env.VIEWER_SERVICE_URL || 'http://viewer-service:3007', changeOrigin: true });
+
+const authRegex = /^\/api\/[^/]+\/auth/;
+const usersRegex = /^\/api\/[^/]+\/users/;
+const departmentsRegex = /^\/api\/[^/]+\/departments/;
+const brandingRegex = /^\/api\/[^/]+\/branding/;
+const managerRegex = /^\/api\/[^/]+\/manager/;
+const viewerRegex = /^\/api\/[^/]+\/viewer/;
+
+// Proxy handler routing requests to corresponding microservices
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/super-admin')) {
-    return createProxyMiddleware({
-      target: process.env.SUPER_ADMIN_SERVICE_URL || 'http://super-admin-service:3001',
-      changeOrigin: true,
-    })(req, res, next);
+    return superAdminProxy(req, res, next);
   }
   
   if (req.path.startsWith('/api/tenant')) {
-    return createProxyMiddleware({
-      target: process.env.TENANT_SERVICE_URL || 'http://tenant-service:3003',
-      changeOrigin: true,
-    })(req, res, next);
+    return tenantProxy(req, res, next);
   }
 
-  const authRegex = /^\/api\/[^/]+\/auth/;
-  const usersRegex = /^\/api\/[^/]+\/users/;
-  const departmentsRegex = /^\/api\/[^/]+\/departments/;
-  const brandingRegex = /^\/api\/[^/]+\/branding/;
-  const managerRegex = /^\/api\/[^/]+\/manager/;
-  const viewerRegex = /^\/api\/[^/]+\/viewer/;
-
   if (authRegex.test(req.path)) {
-    return createProxyMiddleware({
-      target: process.env.AUTH_SERVICE_URL || 'http://auth-service:3002',
-      changeOrigin: true,
-    })(req, res, next);
+    return authProxy(req, res, next);
   }
 
   if (usersRegex.test(req.path) || departmentsRegex.test(req.path) || brandingRegex.test(req.path)) {
-    return createProxyMiddleware({
-      target: process.env.USER_SERVICE_URL || 'http://user-service:3004',
-      changeOrigin: true,
-    })(req, res, next);
+    return userProxy(req, res, next);
   }
 
   if (managerRegex.test(req.path)) {
-    return createProxyMiddleware({
-      target: process.env.MANAGER_SERVICE_URL || 'http://manager-service:3006',
-      changeOrigin: true,
-    })(req, res, next);
+    return managerProxy(req, res, next);
   }
 
   if (viewerRegex.test(req.path)) {
-    return createProxyMiddleware({
-      target: process.env.VIEWER_SERVICE_URL || 'http://viewer-service:3007',
-      changeOrigin: true,
-    })(req, res, next);
+    return viewerProxy(req, res, next);
   }
 
   next();

@@ -19,9 +19,14 @@ const ingestController = require('../controllers/ingest.controller');
 const approvalController = require('../controllers/approval.controller');
 const activityController = require('../controllers/activity.controller');
 const authenticateApiKey = require('../middlewares/apiKey.middleware');
+const caseSyncController = require('../controllers/caseSync.controller');
 
 // Resolve tenant and enforce authorization for all routes
 router.use(tenantResolver);
+
+// VerifyChain Automated Real-Time Verification Case & Document Sync
+router.post('/sync-case', managerResolver, caseSyncController.syncCase);
+router.post('/sync-batch-cases', managerResolver, caseSyncController.syncBatchCases);
 
 // PUBLIC Endpoints for shared link resolutions (no auth token required to preview/download shared files!)
 router.get('/shares/resolve/:token', managerResolver, shareController.resolveShareLink);
@@ -39,12 +44,15 @@ router.post(
   upload.single('file'),
   async (req, res, next) => {
     try {
+      // Subscription lock removed per user specification
+      /*
       if (req.isAccessLocked) {
         return res.status(403).json({
           success: false,
           message: 'Your subscription has expired. Please upgrade or renew your plan to continue uploading files.'
         });
       }
+      */
       const userRole = req.user.role;
       const userId = req.user.userId;
       const tenantId = req.user.companySlug;

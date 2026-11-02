@@ -144,12 +144,12 @@ const tenantSchema = new mongoose.Schema({
   subscription: {
     plan: {
       type: String,
-      enum: ['Trial', 'Basic', 'Pro', 'Ultra'],
+      enum: ['Trial', 'Basic', 'Pro', 'Ultra', 'Enterprise'],
       default: 'Trial'
     },
     status: {
       type: String,
-      enum: ['active', 'expired', 'past_due', 'cancelled'],
+      enum: ['active', 'expired', 'past_due', 'cancelled', 'Active'],
       default: 'active'
     },
     razorpayOrderId: {

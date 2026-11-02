@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema({
     enum: ['Tenant Admin', 'Manager', 'Reporting Manager', 'Legal Team', 'Compliance Team', 'Viewer'],
     required: true,
   },
+  vcRole: {
+    type: String,
+    default: null,
+  },
   reportingManagerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

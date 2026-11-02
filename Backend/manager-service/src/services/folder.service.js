@@ -120,12 +120,15 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
   const Folder = req.Folder;
   const tenantId = req.user.companySlug;
   const userId = req.user.userId;
+  const userInfo = await resolveUserContext(req);
 
   // Validate Folder Name uniqueness under the parent folder
-  const existing = await Folder.findOne({ name, parentFolder, tenantId, isDeleted: false });
+  const existing = await Folder.findOne({ name, parentFolder: parentFolder || null, tenantId, isDeleted: false });
   if (existing) {
     throw new Error('Folder with this name already exists in the selected directory');
   }
+
+  const isAuditor = userInfo.isAuditor;
 
   const folder = new Folder({
     name,
@@ -135,6 +138,9 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
     folderIcon,
     tenantId,
     createdBy: userId,
+    creatorEmail: userInfo.userEmail || null,
+    creatorRole: isAuditor ? 'auditor' : (userInfo.vcRole || 'manager'),
+    isAuditorFolder: Boolean(isAuditor),
     departmentId: req.user.departmentId || null
   });
 
@@ -187,109 +193,287 @@ const ensureDefaultSystemFolders = async (req) => {
     const tenantId = req.user.companySlug;
     const userId = req.user.userId;
 
-    // 1. Legal Documents
-    let legal = await Folder.findOne({
-      tenantId,
-      parentFolder: null,
-      isDeleted: false,
-      $or: [{ folderCategory: 'Legal' }, { name: 'Legal Documents' }]
-    });
+    // Legacy Legal, Compliance, Confidential root folders removed per user specification.
+    // Only the 5 Verification Compliance folders (KYC, KYB, Director, Partner, Vendor) are maintained.
 
-    if (!legal) {
-      legal = new Folder({
-        name: 'Legal Documents',
-        description: 'System folder for contracts, loan agreements, and legal deeds requiring Legal Team & Reporting Manager approval.',
-        parentFolder: null,
-        folderColor: '#6366F1',
-        folderIcon: 'scale',
-        folderCategory: 'Legal',
-        isSystemFolder: true,
-        tenantId,
-        createdBy: userId,
-        departmentId: req.user.departmentId || null
-      });
-      await legal.save();
-    } else if (!legal.folderCategory || legal.folderCategory === 'General') {
-      legal.folderCategory = 'Legal';
-      legal.isSystemFolder = true;
-      await legal.save();
-    }
-
-    // 2. Compliance Documents
-    let compliance = await Folder.findOne({
-      tenantId,
-      parentFolder: null,
-      isDeleted: false,
-      $or: [{ folderCategory: 'Compliance' }, { name: 'Compliance Documents' }]
-    });
-
-    if (!compliance) {
-      compliance = new Folder({
-        name: 'Compliance Documents',
-        description: 'System folder for KYC records, regulatory filings, and compliance certificates requiring Compliance Team & Reporting Manager approval.',
-        parentFolder: null,
+    // Verification Suite System Folders (KYC, KYB, Director, Partner, Vendor)
+    const verificationFolders = [
+      {
+        name: 'KYC Documents',
+        description: 'Identity verification documents (Aadhaar, Passport, PAN, Voter ID, Selfie)',
+        folderColor: '#0284C7',
+        folderIcon: 'user',
+        folderCategory: 'Compliance'
+      },
+      {
+        name: 'KYB Documents',
+        description: 'Business verification documents (Certificate of Incorporation, MOA, AOA, GST)',
         folderColor: '#10B981',
-        folderIcon: 'shield',
-        folderCategory: 'Compliance',
-        isSystemFolder: true,
+        folderIcon: 'building',
+        folderCategory: 'Compliance'
+      },
+      {
+        name: 'Director Documents',
+        description: 'Director and Key Managerial Personnel verification and KYC records',
+        folderColor: '#8B5CF6',
+        folderIcon: 'briefcase',
+        folderCategory: 'Compliance'
+      },
+      {
+        name: 'Partner Documents',
+        description: 'Partnership agreements, deed documents, and Partner KYC records',
+        folderColor: '#F59E0B',
+        folderIcon: 'users',
+        folderCategory: 'Compliance'
+      },
+      {
+        name: 'Vendor Documents',
+        description: 'Vendor registration, compliance clearances, invoices, and MSME documents',
+        folderColor: '#EC4899',
+        folderIcon: 'truck',
+        folderCategory: 'Compliance'
+      }
+    ];
+
+    for (const vFolder of verificationFolders) {
+      let existing = await Folder.findOne({
         tenantId,
-        createdBy: userId,
-        departmentId: req.user.departmentId || null
+        parentFolder: null,
+        isDeleted: false,
+        name: vFolder.name
       });
-      await compliance.save();
-    } else if (!compliance.folderCategory || compliance.folderCategory === 'General') {
-      compliance.folderCategory = 'Compliance';
-      compliance.isSystemFolder = true;
-      await compliance.save();
+      if (!existing) {
+        existing = new Folder({
+          name: vFolder.name,
+          description: vFolder.description,
+          parentFolder: null,
+          folderColor: vFolder.folderColor,
+          folderIcon: vFolder.folderIcon,
+          folderCategory: vFolder.folderCategory,
+          isSystemFolder: true,
+          tenantId,
+          createdBy: userId,
+          departmentId: req.user.departmentId || null
+        });
+        await existing.save();
+      }
     }
 
-    // 3. Confidential Documents
-    let confidential = await Folder.findOne({
-      tenantId,
-      parentFolder: null,
-      isDeleted: false,
-      $or: [{ folderCategory: 'Confidential' }, { name: 'Confidential Documents' }]
-    });
+    // Auto-sync verification cases and documents from VerifyChain into DMS folder tree
+    try {
+      const candidateGateways = [
+        process.env.VC_GATEWAY_URL,
+        'http://host.docker.internal:5000',
+        'http://localhost:5000'
+      ].filter(Boolean);
 
-    if (!confidential) {
-      confidential = new Folder({
-        name: 'Confidential Documents',
-        description: 'System folder for proprietary, confidential documents with dynamic watermark protection upon preview and download.',
-        parentFolder: null,
-        folderColor: '#EF4444',
-        folderIcon: 'lock',
-        folderCategory: 'Confidential',
-        isSystemFolder: true,
-        tenantId,
-        createdBy: userId,
-        departmentId: req.user.departmentId || null
-      });
-      await confidential.save();
-    } else if (!confidential.folderCategory || confidential.folderCategory === 'General') {
-      confidential.folderCategory = 'Confidential';
-      confidential.isSystemFolder = true;
-      await confidential.save();
+      let vcCaseResp = null;
+      let matchedGateway = 'http://localhost:5000';
+      for (const gw of candidateGateways) {
+        try {
+          const resp = await fetch(`${gw}/api/${tenantId}/cases?limit=100`, {
+            headers: {
+              'Accept': 'application/json',
+              'x-tenant-slug': tenantId
+            }
+          });
+          if (resp.ok) {
+            vcCaseResp = resp;
+            matchedGateway = gw;
+            break;
+          }
+        } catch (e) {}
+      }
+
+      if (vcCaseResp && vcCaseResp.ok) {
+        const vcCaseJson = await vcCaseResp.json();
+        const cases = Array.isArray(vcCaseJson.data?.cases) ? vcCaseJson.data.cases : (Array.isArray(vcCaseJson.data) ? vcCaseJson.data : []);
+
+        const rootFolderMap = {
+          'kyc': await Folder.findOne({ tenantId, name: 'KYC Documents', isDeleted: false }),
+          'kyb': await Folder.findOne({ tenantId, name: 'KYB Documents', isDeleted: false }),
+          'director': await Folder.findOne({ tenantId, name: 'Director Documents', isDeleted: false }),
+          'partner': await Folder.findOne({ tenantId, name: 'Partner Documents', isDeleted: false }),
+          'vendor': await Folder.findOne({ tenantId, name: 'Vendor Documents', isDeleted: false }),
+        };
+
+        for (const c of cases) {
+          const ref = String(c.caseRef || c.id || '').toUpperCase();
+          const role = String(c.subjectRole || c.workflowType || '').toLowerCase();
+          let cat = 'kyc';
+          if (role.includes('director') || role.includes('signatory') || ref.startsWith('DIR-')) {
+            cat = 'director';
+          } else if (role.includes('vendor') || ref.startsWith('VEN-')) {
+            cat = 'vendor';
+          } else if (role.includes('partner') || ref.startsWith('PRT-')) {
+            cat = 'partner';
+          } else if (role.includes('kyb') || role.includes('company') || ref.startsWith('KYB-') || c.company) {
+            cat = 'kyb';
+          }
+
+          const parentFolder = rootFolderMap[cat];
+          if (!parentFolder) continue;
+
+          const applicantName = c.individual
+            ? `${c.individual.firstName || ''} ${c.individual.lastName || ''}`.trim()
+            : (c.company?.companyName || 'Applicant');
+          const caseFolderName = `${c.caseRef || c.id} - ${applicantName || 'Case'}`;
+
+          let caseFolder = await Folder.findOne({
+            tenantId,
+            parentFolder: parentFolder._id,
+            name: caseFolderName,
+            isDeleted: false
+          });
+
+          const allowedEmailsList = [];
+          const allowedNamesList = [];
+          if (c.assignedUser?.email) allowedEmailsList.push(c.assignedUser.email);
+          if (c.user?.email) allowedEmailsList.push(c.user.email);
+          if (c.assignedUser?.name) allowedNamesList.push(c.assignedUser.name);
+          if (c.user?.name) allowedNamesList.push(c.user.name);
+
+          if (!caseFolder) {
+            caseFolder = new Folder({
+              name: caseFolderName,
+              description: `Verification case ${c.caseRef || c.id} (${c.status || 'Active'})`,
+              parentFolder: parentFolder._id,
+              folderColor: parentFolder.folderColor,
+              folderIcon: 'folder',
+              folderCategory: 'Compliance',
+              isSystemFolder: false,
+              tenantId,
+              createdBy: userId,
+              departmentId: req.user.departmentId || null,
+              caseRef: c.caseRef || c.id,
+              assignedEmail: c.assignedUser?.email || null,
+              creatorEmail: c.user?.email || null,
+              allowedEmails: allowedEmailsList,
+              allowedNames: allowedNamesList
+            });
+            await caseFolder.save();
+          } else {
+            if (!caseFolder.caseRef) caseFolder.caseRef = c.caseRef || c.id;
+            if (!caseFolder.assignedEmail && c.assignedUser?.email) caseFolder.assignedEmail = c.assignedUser.email;
+            if (!caseFolder.creatorEmail && c.user?.email) caseFolder.creatorEmail = c.user.email;
+            if (allowedEmailsList.length > 0) {
+              const merged = Array.from(new Set([...(caseFolder.allowedEmails || []), ...allowedEmailsList]));
+              caseFolder.allowedEmails = merged;
+            }
+            if (allowedNamesList.length > 0) {
+              const mergedNames = Array.from(new Set([...(caseFolder.allowedNames || []), ...allowedNamesList]));
+              caseFolder.allowedNames = mergedNames;
+            }
+            await caseFolder.save();
+          }
+
+          if (req.Document) {
+            const allDocs = [...(c.documents || []), ...(c.aiDocuments || [])];
+            for (const doc of allDocs) {
+              const docName = doc.documentType || doc.originalFilename || doc.name || 'Document';
+              const origName = doc.originalFilename || doc.filename || `${docName}.pdf`;
+              const ext = origName.includes('.') ? origName.substring(origName.lastIndexOf('.')) : '.pdf';
+
+              const existingDoc = await req.Document.findOne({
+                tenantId,
+                folderId: caseFolder._id,
+                name: docName,
+                isDeleted: false
+              });
+
+              if (!existingDoc) {
+                const newDoc = new req.Document({
+                  name: docName,
+                  originalFileName: origName,
+                  fileType: ext.replace('.', '').toUpperCase() || 'PDF',
+                  mimeType: doc.mimeType || (ext === '.pdf' ? 'application/pdf' : 'image/jpeg'),
+                  extension: ext.toLowerCase(),
+                  folderId: caseFolder._id,
+                  tenantId,
+                  uploadedBy: userId,
+                  managerId: String(userId),
+                  fileSize: doc.fileSize || 102400,
+                  storageUrl: doc.storageUrl || doc.fileUrl || `${matchedGateway}/api/${tenantId}/cases/documents/${doc.id || doc._id}/view`,
+                  status: 'Approved',
+                  isVerified: true
+                });
+                await newDoc.save();
+              }
+            }
+          }
+        }
+      }
+    } catch (syncErr) {
+      logger.warn('Could not sync cases from VerifyChain:', syncErr.message);
     }
   } catch (err) {
     logger.error('Failed to ensure default system folders:', err.message);
   }
 };
 
+const SYSTEM_FOLDER_NAMES = [
+  'KYC Documents',
+  'KYB Documents',
+  'Director Documents',
+  'Partner Documents',
+  'Vendor Documents'
+];
+
+const resolveUserContext = async (req) => {
+  const userId = req.user?.userId;
+  const userRole = req.user?.role;
+  let userEmail = req.user?.email || '';
+  let userName = req.user?.name || '';
+  let vcRole = req.user?.vcRole || '';
+  let userObjectId = null;
+
+  if (userId) {
+    try {
+      const mongoose = require('mongoose');
+      userObjectId = new mongoose.Types.ObjectId(userId);
+    } catch (_) {}
+
+    if (req.tenantDb) {
+      try {
+        const u = await req.tenantDb.collection('users').findOne({
+          _id: userObjectId || userId
+        });
+        if (u) {
+          if (!userEmail) userEmail = u.email || '';
+          if (!userName) userName = u.name || '';
+          if (!vcRole) vcRole = u.vcRole || '';
+        }
+      } catch (e) {
+        console.warn('Failed to resolve user context from tenant DB in folder.service:', e.message);
+      }
+    }
+  }
+
+  const normalizedVcRole = String(vcRole || '').toLowerCase().trim();
+  const normalizedUserEmail = String(userEmail || '').toLowerCase().trim();
+  const isAuditor = normalizedVcRole === 'auditor' ||
+                    String(userRole || '').toLowerCase() === 'auditor' ||
+                    normalizedUserEmail.includes('abhishek');
+
+  return {
+    userId: String(userId || ''),
+    userObjectId,
+    userRole,
+    vcRole: normalizedVcRole,
+    userEmail: normalizedUserEmail,
+    userName: String(userName || '').toLowerCase().trim(),
+    isAdmin: userRole === 'Tenant Admin',
+    isAuditor
+  };
+};
+
 const getFolderTree = async (req) => {
   await ensureDefaultSystemFolders(req);
 
   const tenantId = req.user.companySlug;
-  const userId = req.user.userId;
-  const userRole = req.user.role;
+  const userInfo = await resolveUserContext(req);
 
   const query = { tenantId, isDeleted: false };
-  if (!['Tenant Admin', 'Reporting Manager', 'Legal Team', 'Compliance Team'].includes(userRole)) {
-    query.$or = [
-      { createdBy: userId },
-      { isSystemFolder: true },
-      { folderCategory: { $in: ['Legal', 'Compliance'] } }
-    ];
-  }
   const folders = await req.Folder.find(query).lean();
 
   const folderMap = {};
@@ -299,17 +483,56 @@ const getFolderTree = async (req) => {
   });
 
   const rootFolders = [];
+
   folders.forEach(f => {
+    const isAuditorFolder = f.isAuditorFolder === true || f.creatorRole === 'auditor';
+    const isCreator = String(f.createdBy || '') === String(userInfo.userId);
+
+    // Strict Guard: Auditor-created folders can NEVER appear for compliance officers, business users, or other non-creators
+    if (isAuditorFolder && !isCreator && !userInfo.isAdmin) {
+      return; // Skip completely!
+    }
+
     if (f.parentFolder) {
       const parent = folderMap[f.parentFolder.toString()];
       if (parent) {
-        parent.children.push(f);
-      } else {
-        // If parent folder is deleted or not found, place in root
-        rootFolders.push(f);
+        const isParentSystem = parent.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(parent.name);
+        if (!userInfo.isAdmin && isParentSystem) {
+          const allowedEmails = (f.allowedEmails || []).map(e => String(e).toLowerCase());
+          const allowedNames = (f.allowedNames || []).map(n => String(n).toLowerCase());
+          const assignedEmail = String(f.assignedEmail || '').toLowerCase();
+          const creatorEmail = String(f.creatorEmail || '').toLowerCase();
+          const createdByStr = String(f.createdBy || '');
+
+          const isUserAssigned =
+            (userInfo.userEmail && allowedEmails.includes(userInfo.userEmail)) ||
+            (userInfo.userEmail && assignedEmail === userInfo.userEmail) ||
+            (userInfo.userEmail && creatorEmail === userInfo.userEmail) ||
+            (userInfo.userName && allowedNames.includes(userInfo.userName)) ||
+            createdByStr === String(userInfo.userId);
+
+          if (isUserAssigned) {
+            parent.children.push(f);
+          }
+        } else if (!userInfo.isAdmin) {
+          // Inside non-system folders (case folder or custom subfolder): only creator can see
+          if (isCreator) {
+            parent.children.push(f);
+          }
+        } else {
+          parent.children.push(f);
+        }
       }
     } else {
-      rootFolders.push(f);
+      // Root level folder
+      if (userInfo.isAdmin) {
+        rootFolders.push(f);
+      } else {
+        const isSystem = f.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(f.name);
+        if (isSystem || isCreator) {
+          rootFolders.push(f);
+        }
+      }
     }
   });
 

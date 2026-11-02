@@ -12,11 +12,35 @@ const tenantResolver = async (req, res, next) => {
   }
 
   try {
-    const tenant = await Tenant.findOne({ companySlug, isActive: true });
+    let tenant = await Tenant.findOne({ companySlug, isActive: true });
     
     if (!tenant) {
-      console.log(`[tenantResolver] tenant not found for slug: ${companySlug}`);
-      return res.status(404).json({ success: false, message: 'Tenant not found or inactive' });
+      console.log(`[tenantResolver] tenant not found for slug: ${companySlug}, auto-provisioning master tenant record`);
+      const mongoUri = process.env.MONGO_MASTER_URI || 'mongodb://localhost:27017/dms_master';
+      const baseUri = mongoUri.split('?')[0].replace(/\/[^/]+$/, '');
+      const queryParams = mongoUri.includes('?') ? '?' + mongoUri.split('?')[1] : '';
+      const safeSlug = companySlug.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const tenantDbUri = `${baseUri}/tenant_${safeSlug.replace(/-/g, '_')}${queryParams}`;
+
+      tenant = new Tenant({
+        companyName: companySlug.replace(/[-_]/g, ' ').toUpperCase(),
+        companySlug: companySlug,
+        companyCode: companySlug.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'TENANT',
+        adminEmail: `admin@${safeSlug}.com`,
+        adminName: `${companySlug.replace(/[-_]/g, ' ')} Admin`,
+        dbUri: tenantDbUri,
+        isActive: true,
+        subscription: { plan: 'Enterprise', status: 'Active' }
+      });
+      try {
+        await tenant.save();
+      } catch (saveErr) {
+        tenant = await Tenant.findOne({ companySlug });
+        if (!tenant) {
+          console.error(`[tenantResolver] failed to auto-provision tenant: ${companySlug}`, saveErr);
+          return res.status(404).json({ success: false, message: 'Tenant not found and auto-provisioning failed' });
+        }
+      }
     }
 
     const tenantDbConnection = await getTenantConnection(companySlug, tenant.dbUri);
@@ -49,13 +73,9 @@ const tenantResolver = async (req, res, next) => {
     const trialEnded = trialEndsAt && new Date(trialEndsAt) < now;
     const planExpired = tenant.subscription?.expiresAt && new Date(tenant.subscription.expiresAt) < now;
 
+    // Subscription model removed per user specification: always unlocked
     let isAccessLocked = false;
-    if (tenant.subscription?.plan === 'Trial' && trialEnded) {
-      isAccessLocked = true;
-    } else if (tenant.subscription?.plan !== 'Trial' && planExpired) {
-      isAccessLocked = true;
-    }
-    req.isAccessLocked = isAccessLocked;
+    req.isAccessLocked = false;
     
     console.log(`[tenantResolver] successfully resolved tenant: ${companySlug}, isAccessLocked: ${isAccessLocked}, calling next()`);
     next();
