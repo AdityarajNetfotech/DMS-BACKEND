@@ -1,3 +1,43 @@
+
+function safeFetchJson(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const isHttps = url.startsWith('https:');
+      const client = isHttps ? https : http;
+      const parsedUrl = new URL(url);
+      const req = client.request({
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'GET',
+        headers,
+        rejectUnauthorized: false
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            json: async () => {
+              try { return JSON.parse(data); } catch(e) { return {}; }
+            }
+          });
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(8000, () => {
+        req.destroy();
+        reject(new Error('Request timed out'));
+      });
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+const https = require('https');
+const http = require('http');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -213,7 +253,7 @@ router.post('/reset-password', tenantResolver, async (req, res, next) => {
 // Single-Sign-On Exchange: redeem VerifyChain one-time SSO token for DMS session
 router.post('/sso-exchange', tenantResolver, async (req, res, next) => {
   try {
-    const { ssoToken } = req.body;
+    const { ssoToken, vcOrigin } = req.body;
     if (!ssoToken) {
       return res.status(400).json({ success: false, message: 'ssoToken is required' });
     }
@@ -222,6 +262,7 @@ router.post('/sso-exchange', tenantResolver, async (req, res, next) => {
     const candidateUrls = [
       process.env.VC_GATEWAY_URL,
       process.env.VC_AUTH_SERVICE_URL,
+      vcOrigin,
       slug ? `https://${slug}.intellinexa.in` : null,
       'https://intellinexa.in',
       'http://verifychain-api-gateway:5000',
@@ -239,9 +280,10 @@ router.post('/sso-exchange', tenantResolver, async (req, res, next) => {
     // Contact VerifyChain auth service to verify and consume the single-use token
     for (const baseUrl of candidateUrls) {
       try {
-        const verifyEndpoint = `${baseUrl}/api/auth/sso-verify?token=${encodeURIComponent(ssoToken)}`;
-        const resp = await fetch(verifyEndpoint, {
-          headers: { 'Accept': 'application/json' }
+        const cleanBase = baseUrl.replace(/\/+$/, '');
+        const verifyEndpoint = `${cleanBase}/api/auth/sso-verify?token=${encodeURIComponent(ssoToken)}`;
+        const resp = await safeFetchJson(verifyEndpoint, {
+          'Accept': 'application/json'
         });
         if (resp.ok || resp.status === 401 || resp.status === 400) {
           vcResp = resp;
