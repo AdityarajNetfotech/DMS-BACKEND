@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const logger = require('../config/logger');
 const activityService = require('../services/activity.service');
 const storageService = require('../services/storage.service');
+const folderService = require('../services/folder.service');
 
 const destDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(destDir)) {
@@ -49,40 +50,9 @@ const SYSTEM_ROOT_FOLDERS = [
   }
 ];
 
-// Ensure the 5 root compliance folders exist for the tenant
+// Ensure the 5 root compliance folders exist for the tenant (delegates to centralized mutex & dedup)
 const ensureRootVerificationFolders = async (req, tenantId, defaultUserId) => {
-  const Folder = req.Folder;
-  const rootFolderMap = {};
-
-  for (const sysFolder of SYSTEM_ROOT_FOLDERS) {
-    let existing = await Folder.findOne({
-      tenantId,
-      parentFolder: null,
-      name: sysFolder.name,
-      isDeleted: false
-    });
-
-    if (!existing) {
-      existing = new Folder({
-        name: sysFolder.name,
-        description: sysFolder.description,
-        parentFolder: null,
-        folderColor: sysFolder.folderColor,
-        folderIcon: sysFolder.folderIcon,
-        folderCategory: sysFolder.folderCategory,
-        isSystemFolder: true,
-        tenantId,
-        createdBy: defaultUserId || null,
-        departmentId: null
-      });
-      await existing.save();
-      logger.info(`[caseSync] Created system root folder '${sysFolder.name}' for tenant ${tenantId}`);
-    }
-
-    rootFolderMap[sysFolder.name] = existing;
-  }
-
-  return rootFolderMap;
+  return await folderService.ensureDefaultSystemFolders(req, tenantId, defaultUserId);
 };
 
 // Map VerifyChain subject_role and caseRef to the corresponding root folder name

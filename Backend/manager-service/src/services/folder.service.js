@@ -187,77 +187,142 @@ const createFolder = async (req, name, description, parentFolder, folderColor, f
   return folder;
 };
 
-const ensureDefaultSystemFolders = async (req) => {
-  try {
-    const Folder = req.Folder;
-    const tenantId = req.user.companySlug;
-    const userId = req.user.userId;
+// In-flight mutex to prevent concurrent double-initialization race conditions
+const inFlightSystemFolderInit = new Map();
 
-    // Legacy Legal, Compliance, Confidential root folders removed per user specification.
-    // Only the 5 Verification Compliance folders (KYC, KYB, Director, Partner, Vendor) are maintained.
+const ensureDefaultSystemFolders = async (req, explicitTenantId, explicitUserId) => {
+  const tenantId = explicitTenantId || req.user?.companySlug || req.params?.companySlug || req.tenant?.companySlug;
+  if (!tenantId) return {};
 
-    // Verification Suite System Folders (KYC, KYB, Director, Partner, Vendor)
-    const verificationFolders = [
-      {
-        name: 'KYC Documents',
-        description: 'Identity verification documents (Aadhaar, Passport, PAN, Voter ID, Selfie)',
-        folderColor: '#0284C7',
-        folderIcon: 'user',
-        folderCategory: 'Compliance'
-      },
-      {
-        name: 'KYB Documents',
-        description: 'Business verification documents (Certificate of Incorporation, MOA, AOA, GST)',
-        folderColor: '#10B981',
-        folderIcon: 'building',
-        folderCategory: 'Compliance'
-      },
-      {
-        name: 'Director Documents',
-        description: 'Director and Key Managerial Personnel verification and KYC records',
-        folderColor: '#8B5CF6',
-        folderIcon: 'briefcase',
-        folderCategory: 'Compliance'
-      },
-      {
-        name: 'Partner Documents',
-        description: 'Partnership agreements, deed documents, and Partner KYC records',
-        folderColor: '#F59E0B',
-        folderIcon: 'users',
-        folderCategory: 'Compliance'
-      },
-      {
-        name: 'Vendor Documents',
-        description: 'Vendor registration, compliance clearances, invoices, and MSME documents',
-        folderColor: '#EC4899',
-        folderIcon: 'truck',
-        folderCategory: 'Compliance'
-      }
-    ];
+  if (inFlightSystemFolderInit.has(tenantId)) {
+    return await inFlightSystemFolderInit.get(tenantId);
+  }
 
-    for (const vFolder of verificationFolders) {
-      let existing = await Folder.findOne({
-        tenantId,
-        parentFolder: null,
-        isDeleted: false,
-        name: vFolder.name
-      });
-      if (!existing) {
-        existing = new Folder({
-          name: vFolder.name,
-          description: vFolder.description,
-          parentFolder: null,
-          folderColor: vFolder.folderColor,
-          folderIcon: vFolder.folderIcon,
-          folderCategory: vFolder.folderCategory,
-          isSystemFolder: true,
+  const runInit = (async () => {
+    try {
+      const Folder = req.Folder;
+      const Document = req.Document;
+      const userId = explicitUserId || req.user?.userId || req.user?._id;
+
+      // Verification Suite System Folders (KYC, KYB, Director, Partner, Vendor)
+      const verificationFolders = [
+        {
+          name: 'KYC Documents',
+          description: 'Identity verification documents (Aadhaar, Passport, PAN, Voter ID, Selfie)',
+          folderColor: '#0284C7',
+          folderIcon: 'user',
+          folderCategory: 'Compliance',
+          key: 'kyc'
+        },
+        {
+          name: 'KYB Documents',
+          description: 'Business verification documents (Certificate of Incorporation, MOA, AOA, GST)',
+          folderColor: '#10B981',
+          folderIcon: 'building',
+          folderCategory: 'Compliance',
+          key: 'kyb'
+        },
+        {
+          name: 'Director Documents',
+          description: 'Director and Key Managerial Personnel verification and KYC records',
+          folderColor: '#8B5CF6',
+          folderIcon: 'briefcase',
+          folderCategory: 'Compliance',
+          key: 'director'
+        },
+        {
+          name: 'Partner Documents',
+          description: 'Partnership agreements, deed documents, and Partner KYC records',
+          folderColor: '#F59E0B',
+          folderIcon: 'users',
+          folderCategory: 'Compliance',
+          key: 'partner'
+        },
+        {
+          name: 'Vendor Documents',
+          description: 'Vendor registration, compliance clearances, invoices, and MSME documents',
+          folderColor: '#EC4899',
+          folderIcon: 'truck',
+          folderCategory: 'Compliance',
+          key: 'vendor'
+        }
+      ];
+
+      const rootFolderMap = {};
+
+      for (const vFolder of verificationFolders) {
+        const matching = await Folder.find({
           tenantId,
-          createdBy: userId,
-          departmentId: req.user.departmentId || null
-        });
-        await existing.save();
+          parentFolder: null,
+          isDeleted: false,
+          name: vFolder.name
+        }).sort({ createdAt: 1 });
+
+        let primaryFolder = null;
+
+        if (matching.length > 0) {
+          primaryFolder = matching[0];
+
+          // Self-Healing Deduplication: If duplicates exist, migrate children/docs and clean duplicates
+          if (matching.length > 1) {
+            const duplicateIds = matching.slice(1).map(f => f._id);
+            try {
+              await Folder.updateMany(
+                { parentFolder: { $in: duplicateIds } },
+                { parentFolder: primaryFolder._id }
+              );
+              if (Document) {
+                await Document.updateMany(
+                  { folderId: { $in: duplicateIds } },
+                  { folderId: primaryFolder._id }
+                );
+              }
+              await Folder.deleteMany({ _id: { $in: duplicateIds } });
+              logger.info(`[DMS Folder Init] Deduplicated ${duplicateIds.length} redundant '${vFolder.name}' folders for tenant ${tenantId}`);
+            } catch (dedupErr) {
+              logger.warn(`[DMS Folder Init] Deduplication cleanup note: ${dedupErr.message}`);
+            }
+          }
+        } else {
+          try {
+            primaryFolder = await Folder.findOneAndUpdate(
+              {
+                tenantId,
+                parentFolder: null,
+                isDeleted: false,
+                name: vFolder.name
+              },
+              {
+                $setOnInsert: {
+                  name: vFolder.name,
+                  description: vFolder.description,
+                  parentFolder: null,
+                  folderColor: vFolder.folderColor,
+                  folderIcon: vFolder.folderIcon,
+                  folderCategory: vFolder.folderCategory,
+                  isSystemFolder: true,
+                  tenantId,
+                  createdBy: userId || null,
+                  departmentId: null
+                }
+              },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+          } catch (upsertErr) {
+            primaryFolder = await Folder.findOne({
+              tenantId,
+              parentFolder: null,
+              isDeleted: false,
+              name: vFolder.name
+            });
+          }
+        }
+
+        if (primaryFolder) {
+          rootFolderMap[vFolder.name] = primaryFolder;
+          rootFolderMap[vFolder.key] = primaryFolder;
+        }
       }
-    }
 
     // Auto-sync verification cases and documents from VerifyChain into DMS folder tree
     try {
@@ -406,8 +471,19 @@ const ensureDefaultSystemFolders = async (req) => {
     } catch (syncErr) {
       logger.warn('Could not sync cases from VerifyChain:', syncErr.message);
     }
+
+    return rootFolderMap;
   } catch (err) {
     logger.error('Failed to ensure default system folders:', err.message);
+    return {};
+  }
+  })();
+
+  inFlightSystemFolderInit.set(tenantId, runInit);
+  try {
+    return await runInit;
+  } finally {
+    inFlightSystemFolderInit.delete(tenantId);
   }
 };
 
@@ -476,15 +552,24 @@ const getFolderTree = async (req) => {
   const query = { tenantId, isDeleted: false };
   const folders = await req.Folder.find(query).lean();
 
+  const seenSystemRoots = new Set();
+  const sanitizedFolders = folders.filter(f => {
+    if (!f.parentFolder && SYSTEM_FOLDER_NAMES.includes(f.name)) {
+      if (seenSystemRoots.has(f.name)) return false;
+      seenSystemRoots.add(f.name);
+    }
+    return true;
+  });
+
   const folderMap = {};
-  folders.forEach(f => {
+  sanitizedFolders.forEach(f => {
     f.children = [];
     folderMap[f._id.toString()] = f;
   });
 
   const rootFolders = [];
 
-  folders.forEach(f => {
+  sanitizedFolders.forEach(f => {
     const isAuditorFolder = f.isAuditorFolder === true || f.creatorRole === 'auditor';
     const isCreator = String(f.createdBy || '') === String(userInfo.userId);
 

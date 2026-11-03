@@ -226,9 +226,15 @@ const getFolderDetails = async (req, res, next) => {
         .populate('approvalWorkflow.legalApproval.approvedBy', 'name email role')
         .populate('approvalWorkflow.complianceApproval.approvedBy', 'name email role');
 
-      // Calculate sizes for childFolders
+      // Calculate sizes for childFolders & guarantee unique root folders
       const childFoldersWithSizes = [];
+      const seenSystemNames = new Set();
+
       for (const f of childFolders) {
+        if (!f.parentFolder && SYSTEM_FOLDER_NAMES.includes(f.name)) {
+          if (seenSystemNames.has(f.name)) continue;
+          seenSystemNames.add(f.name);
+        }
         const size = await calculateFolderSize(f._id, Folder, Document, tenantId);
         const plainFolder = f.toObject();
         plainFolder.fileSize = size;
