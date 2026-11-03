@@ -5,6 +5,7 @@ const logger = require('../config/logger');
 const activityService = require('../services/activity.service');
 const storageService = require('../services/storage.service');
 const folderService = require('../services/folder.service');
+const verificationDocHelper = require('../helpers/verificationDoc.helper');
 
 const destDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(destDir)) {
@@ -232,7 +233,29 @@ const processSingleCaseSync = async (req, caseData) => {
       }
 
       if (!storageUrl) {
-        storageUrl = `/uploads/${tenantId}_${caseRef}_placeholder.pdf`;
+        try {
+          const safeBaseName = path.basename(rawOriginalName).replace(/[^a-zA-Z0-9.-]/g, '_');
+          const pdfBaseName = safeBaseName.toLowerCase().endsWith('.pdf') ? safeBaseName : `${safeBaseName}.pdf`;
+          const diskFileName = `${tenantId}_${caseRef}_${doc.id || Date.now()}_${pdfBaseName}`;
+          const physicalPath = path.join(destDir, diskFileName);
+
+          if (!fs.existsSync(physicalPath)) {
+            const certBuf = await verificationDocHelper.generateVerificationPdf({
+              name: docDisplayName,
+              originalFileName: rawOriginalName,
+              documentType: docCategory,
+              customerName: resolvedApplicant,
+              customerRef: caseRef,
+              description: `Verified via VerifyChain (${doc.verificationStatus || status || 'VERIFIED'})`
+            }, tenantId);
+            fs.writeFileSync(physicalPath, certBuf);
+            fileSize = certBuf.length;
+          }
+          storageUrl = `/uploads/${diskFileName}`;
+        } catch (pdfErr) {
+          logger.warn(`Could not generate fallback PDF for caseSync: ${pdfErr.message}`);
+          storageUrl = `/uploads/${tenantId}_${caseRef}_placeholder.pdf`;
+        }
       }
 
       // Check if document already exists in this case folder

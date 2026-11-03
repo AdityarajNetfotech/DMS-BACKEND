@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const cloudinaryHelper = require('../helpers/cloudinary.helper');
+const verificationDocHelper = require('../helpers/verificationDoc.helper');
 
 // Helper to fetch all document IDs permitted to a viewer via active shares
 const getPermittedDocIdsForViewer = async (req) => {
@@ -296,6 +297,7 @@ const previewDocument = async (req, res, next) => {
     const docFileName = doc.originalFileName || `${doc.name}.${doc.extension || 'pdf'}`;
     const isPdf = (doc.mimeType === 'application/pdf') || docFileName.toLowerCase().endsWith('.pdf');
 
+    let foundPath = null;
     if (doc.storageUrl.startsWith('/uploads') || doc.storageUrl.startsWith('uploads') || !doc.storageUrl.startsWith('http')) {
       const fileName = path.basename(doc.storageUrl);
       const possiblePaths = [
@@ -303,33 +305,47 @@ const previewDocument = async (req, res, next) => {
         path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl),
         path.join(process.cwd(), 'uploads', fileName)
       ];
-      let foundPath = possiblePaths.find((p) => fs.existsSync(p));
+      foundPath = possiblePaths.find((p) => fs.existsSync(p));
+    }
 
-      if (foundPath) {
-        let finalMimeType = doc.mimeType;
-        if (!finalMimeType || finalMimeType === 'application/octet-stream') {
-          const ext = path.extname(foundPath).toLowerCase();
-          const mimeMap = {
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.webp': 'image/webp',
-            '.gif': 'image/gif',
-            '.svg': 'image/svg+xml',
-            '.pdf': 'application/pdf',
-            '.txt': 'text/plain',
-            '.csv': 'text/csv',
-            '.json': 'application/json'
-          };
-          finalMimeType = mimeMap[ext] || 'application/octet-stream';
+    // Self-healing fallback for missing verification case documents
+    if (!foundPath) {
+      try {
+        const uploadsDir = path.join(__dirname, '../../uploads');
+        const ensured = await verificationDocHelper.ensureDocumentFile(doc, tenantId, uploadsDir);
+        if (ensured && ensured.filePath && fs.existsSync(ensured.filePath)) {
+          foundPath = ensured.filePath;
         }
-        res.setHeader('Content-Type', finalMimeType);
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
-        return res.sendFile(foundPath);
+      } catch (ensureErr) {
+        console.warn('ensureDocumentFile in viewer previewDocument warning:', ensureErr.message);
       }
-      return res.status(404).json({ success: false, message: 'Physical file not found locally' });
-    } else {
+    }
+
+    if (foundPath) {
+      let finalMimeType = doc.mimeType;
+      if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+        const ext = path.extname(foundPath).toLowerCase();
+        const mimeMap = {
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp',
+          '.gif': 'image/gif',
+          '.svg': 'image/svg+xml',
+          '.pdf': 'application/pdf',
+          '.txt': 'text/plain',
+          '.csv': 'text/csv',
+          '.json': 'application/json'
+        };
+        finalMimeType = mimeMap[ext] || 'application/octet-stream';
+      }
+      res.setHeader('Content-Type', finalMimeType);
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
+      return res.sendFile(foundPath);
+    }
+
+    if (doc.storageUrl && doc.storageUrl.startsWith('http') && !doc.storageUrl.includes('localhost') && !doc.storageUrl.includes('host.docker.internal')) {
       return cloudinaryHelper.streamRemoteFile(
         doc.storageUrl,
         res,
@@ -338,6 +354,8 @@ const previewDocument = async (req, res, next) => {
         false
       );
     }
+
+    return res.status(404).json({ success: false, message: 'Physical file not found locally' });
   } catch (err) { next(err); }
 };
 

@@ -101,8 +101,12 @@ services:
       dockerfile: ./viewer-service/Dockerfile
     expose:
       - "3007"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: .env
     volumes:
+      - ./viewer-service/src:/usr/src/app/src
+      - ./shared:/usr/src/app/src/shared
       - manager-uploads:/usr/src/app/uploads
     restart: unless-stopped
 

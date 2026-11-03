@@ -7,6 +7,7 @@ const storageHelper = require('../helpers/storage.helper');
 const storageService = require('./storage.service');
 const activityService = require('./activity.service');
 const logger = require('../config/logger');
+const verificationDocHelper = require('../helpers/verificationDoc.helper');
 
 // Recursive helper to soft delete children (both folders and documents)
 const recursivelySoftDelete = async (req, parentId, deletedAt, session) => {
@@ -327,7 +328,12 @@ const ensureDefaultSystemFolders = async (req, explicitTenantId, explicitUserId)
     // Auto-sync verification cases and documents from VerifyChain into DMS folder tree
     try {
       const candidateGateways = [
+        process.env.VERIFYCHAIN_API_URL,
         process.env.VC_GATEWAY_URL,
+        'http://103.192.198.240:5000',
+        'http://verifychain-api-gateway:5000',
+        'https://intellinexa.in',
+        tenantId ? `https://${tenantId}.intellinexa.in` : null,
         'http://host.docker.internal:5000',
         'http://localhost:5000'
       ].filter(Boolean);
@@ -447,6 +453,34 @@ const ensureDefaultSystemFolders = async (req, explicitTenantId, explicitUserId)
               });
 
               if (!existingDoc) {
+                let resolvedStorageUrl = doc.storageUrl || doc.fileUrl || '';
+                let finalFileSize = doc.fileSize || 102400;
+
+                // Ensure physical file exists locally on disk
+                try {
+                  const uploadsDir = path.join(__dirname, '../../uploads');
+                  const applicantName = c.individual ? `${c.individual.firstName || ''} ${c.individual.lastName || ''}`.trim() : (c.company?.companyName || 'Verified Entity');
+                  const ensured = await verificationDocHelper.ensureDocumentFile({
+                    ...doc,
+                    name: docName,
+                    originalFileName: origName,
+                    customerRef: ref,
+                    customerName: applicantName,
+                    documentType: doc.documentCategory || doc.documentType || 'Verification Document'
+                  }, tenantId, uploadsDir);
+
+                  if (ensured && ensured.filePath) {
+                    resolvedStorageUrl = `/uploads/${path.basename(ensured.filePath)}`;
+                    if (ensured.buffer) finalFileSize = ensured.buffer.length;
+                  }
+                } catch (ensureErr) {
+                  logger.warn(`Could not ensure physical file for ${docName}: ${ensureErr.message}`);
+                }
+
+                if (!resolvedStorageUrl) {
+                  resolvedStorageUrl = `${matchedGateway}/api/${tenantId}/cases/documents/${doc.id || doc._id}/view`;
+                }
+
                 const newDoc = new req.Document({
                   name: docName,
                   originalFileName: origName,
@@ -457,8 +491,8 @@ const ensureDefaultSystemFolders = async (req, explicitTenantId, explicitUserId)
                   tenantId,
                   uploadedBy: userId,
                   managerId: String(userId),
-                  fileSize: doc.fileSize || 102400,
-                  storageUrl: doc.storageUrl || doc.fileUrl || `${matchedGateway}/api/${tenantId}/cases/documents/${doc.id || doc._id}/view`,
+                  fileSize: finalFileSize,
+                  storageUrl: resolvedStorageUrl,
                   status: 'Approved',
                   isVerified: true
                 });

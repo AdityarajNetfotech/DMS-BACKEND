@@ -8,6 +8,7 @@ const storageHelper = require('../helpers/storage.helper');
 const documentService = require('../services/document.service');
 const activityService = require('../services/activity.service');
 const signatureService = require('../services/signature.service');
+const verificationDocHelper = require('../helpers/verificationDoc.helper');
 const { 
   updateDocumentSchema, 
   lockDocumentSchema, 
@@ -138,6 +139,17 @@ const getStampedAndWatermarkedPdf = async (doc, req, isConfidential) => {
     }
 
     if (!rawBuffer) {
+      try {
+        const ensured = await verificationDocHelper.ensureDocumentFile(doc, req.user?.companySlug || doc.tenantId, path.join(__dirname, '../../uploads'));
+        if (ensured && ensured.buffer) {
+          rawBuffer = ensured.buffer;
+        }
+      } catch (ensureErr) {
+        console.warn('ensureDocumentFile in getStampedAndWatermarkedPdf warning:', ensureErr.message);
+      }
+    }
+
+    if (!rawBuffer) {
       return null;
     }
 
@@ -215,12 +227,29 @@ const downloadDocument = async (req, res, next) => {
       }
     }
 
+    let downloadPath = null;
     if (doc.storageUrl && doc.storageUrl.startsWith('/uploads')) {
-      const filePath = path.join(__dirname, '../../', doc.storageUrl);
-      if (fs.existsSync(filePath)) {
-        return res.download(filePath, docFileName);
+      const possiblePaths = [
+        path.join(__dirname, '../../uploads', path.basename(doc.storageUrl)),
+        path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl),
+        path.join(process.cwd(), 'uploads', path.basename(doc.storageUrl))
+      ];
+      downloadPath = possiblePaths.find((p) => fs.existsSync(p));
+    }
+
+    if (!downloadPath) {
+      try {
+        const ensured = await verificationDocHelper.ensureDocumentFile(doc, tenantId, path.join(__dirname, '../../uploads'));
+        if (ensured && ensured.filePath && fs.existsSync(ensured.filePath)) {
+          downloadPath = ensured.filePath;
+        }
+      } catch (ensureErr) {
+        console.warn('ensureDocumentFile in downloadDocument warning:', ensureErr.message);
       }
-      return res.status(404).json({ success: false, message: 'Physical file not found locally' });
+    }
+
+    if (downloadPath) {
+      return res.download(downloadPath, docFileName);
     } else {
       // Stream remote Cloudinary/S3 file directly as download attachment
       return streamRemoteFile(
@@ -268,6 +297,7 @@ const previewDocument = async (req, res, next) => {
       }
     }
 
+    let foundPath = null;
     if (doc.storageUrl && (doc.storageUrl.startsWith('/uploads') || doc.storageUrl.startsWith('uploads') || !doc.storageUrl.startsWith('http'))) {
       const fileName = path.basename(doc.storageUrl);
       const possiblePaths = [
@@ -275,35 +305,57 @@ const previewDocument = async (req, res, next) => {
         path.join(__dirname, '../../', doc.storageUrl.startsWith('/') ? doc.storageUrl.slice(1) : doc.storageUrl),
         path.join(process.cwd(), 'uploads', fileName)
       ];
-      let foundPath = possiblePaths.find((p) => fs.existsSync(p));
+      foundPath = possiblePaths.find((p) => fs.existsSync(p));
+    }
 
-      if (foundPath) {
-        let finalMimeType = doc.mimeType;
-        if (!finalMimeType || finalMimeType === 'application/octet-stream') {
-          const ext = path.extname(foundPath).toLowerCase();
-          const mimeMap = {
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.webp': 'image/webp',
-            '.gif': 'image/gif',
-            '.svg': 'image/svg+xml',
-            '.pdf': 'application/pdf',
-            '.txt': 'text/plain',
-            '.csv': 'text/csv',
-            '.json': 'application/json'
-          };
-          finalMimeType = mimeMap[ext] || 'application/octet-stream';
+    // Self-healing fallback for missing verification case documents
+    if (!foundPath) {
+      try {
+        const uploadsDir = path.join(__dirname, '../../uploads');
+        const ensured = await verificationDocHelper.ensureDocumentFile(doc, tenantId, uploadsDir);
+        if (ensured && ensured.filePath && fs.existsSync(ensured.filePath)) {
+          foundPath = ensured.filePath;
         }
-        res.setHeader('Content-Type', finalMimeType);
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
-        return res.sendFile(foundPath);
+      } catch (ensureErr) {
+        console.warn('ensureDocumentFile in previewDocument warning:', ensureErr.message);
       }
-      return res.status(404).json({ success: false, message: 'Physical file not found locally' });
-    } else {
+    }
+
+    if (foundPath) {
+      let finalMimeType = doc.mimeType;
+      if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+        const ext = path.extname(foundPath).toLowerCase();
+        const mimeMap = {
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp',
+          '.gif': 'image/gif',
+          '.svg': 'image/svg+xml',
+          '.pdf': 'application/pdf',
+          '.txt': 'text/plain',
+          '.csv': 'text/csv',
+          '.json': 'application/json'
+        };
+        finalMimeType = mimeMap[ext] || 'application/octet-stream';
+      }
+      res.setHeader('Content-Type', finalMimeType);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(docFileName)}"`);
+      return res.sendFile(foundPath);
+    }
+
+    if (doc.storageUrl && doc.storageUrl.startsWith('http') && !doc.storageUrl.includes('localhost') && !doc.storageUrl.includes('host.docker.internal')) {
       // Stream remote Cloudinary file directly to browser
       return streamRemoteFile(
         doc.storageUrl,
+        res,
+        docFileName,
+        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        false
+      );
+    }
+
+    return res.status(404).json({ success: false, message: 'Physical file not found locally' });
         res,
         docFileName,
         doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
