@@ -58,6 +58,18 @@ const folderSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isSystemFolder: {
+    type: Boolean,
+    default: false,
+  },
+  caseRef: {
+    type: String,
+    default: null,
+  },
+  caseStatus: {
+    type: String,
+    default: null,
+  },
   deletedAt: {
     type: Date,
     default: null,

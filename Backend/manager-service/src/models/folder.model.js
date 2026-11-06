@@ -74,6 +74,10 @@ const folderSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  caseStatus: {
+    type: String,
+    default: null,
+  },
   assignedEmail: {
     type: String,
     default: null,

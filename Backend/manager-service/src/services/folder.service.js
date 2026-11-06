@@ -617,25 +617,40 @@ const getFolderTree = async (req) => {
       if (parent) {
         const isParentSystem = parent.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(parent.name);
         if (!userInfo.isAdmin && isParentSystem) {
-          const allowedEmails = (f.allowedEmails || []).map(e => String(e).toLowerCase());
-          const allowedNames = (f.allowedNames || []).map(n => String(n).toLowerCase());
-          const assignedEmail = String(f.assignedEmail || '').toLowerCase();
-          const creatorEmail = String(f.creatorEmail || '').toLowerCase();
-          const createdByStr = String(f.createdBy || '');
+          if (userInfo.isAuditor) {
+            // Auditor should ONLY see cases that are CLOSED by the compliance officer!
+            const statusUpper = String(f.caseStatus || '').toUpperCase();
+            const descUpper = String(f.description || '').toUpperCase();
+            const isClosed = statusUpper === 'CASE_CLOSED' ||
+                             statusUpper === 'CLOSED' ||
+                             statusUpper === 'COMPLETED' ||
+                             descUpper.includes('CASE_CLOSED') ||
+                             descUpper.includes('(CLOSED)');
 
-          const isUserAssigned =
-            (userInfo.userEmail && allowedEmails.includes(userInfo.userEmail)) ||
-            (userInfo.userEmail && assignedEmail === userInfo.userEmail) ||
-            (userInfo.userEmail && creatorEmail === userInfo.userEmail) ||
-            (userInfo.userName && allowedNames.includes(userInfo.userName)) ||
-            createdByStr === String(userInfo.userId);
+            if (isClosed || isCreator) {
+              parent.children.push(f);
+            }
+          } else {
+            const allowedEmails = (f.allowedEmails || []).map(e => String(e).toLowerCase());
+            const allowedNames = (f.allowedNames || []).map(n => String(n).toLowerCase());
+            const assignedEmail = String(f.assignedEmail || '').toLowerCase();
+            const creatorEmail = String(f.creatorEmail || '').toLowerCase();
+            const createdByStr = String(f.createdBy || '');
 
-          if (isUserAssigned) {
-            parent.children.push(f);
+            const isUserAssigned =
+              (userInfo.userEmail && allowedEmails.includes(userInfo.userEmail)) ||
+              (userInfo.userEmail && assignedEmail === userInfo.userEmail) ||
+              (userInfo.userEmail && creatorEmail === userInfo.userEmail) ||
+              (userInfo.userName && allowedNames.includes(userInfo.userName)) ||
+              createdByStr === String(userInfo.userId);
+
+            if (isUserAssigned) {
+              parent.children.push(f);
+            }
           }
         } else if (!userInfo.isAdmin) {
-          // Inside non-system folders (case folder or custom subfolder): only creator can see
-          if (isCreator) {
+          // Inside non-system folders (case folder or custom subfolder)
+          if (userInfo.isAuditor || isCreator) {
             parent.children.push(f);
           }
         } else {

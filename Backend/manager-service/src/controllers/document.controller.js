@@ -356,12 +356,6 @@ const previewDocument = async (req, res, next) => {
     }
 
     return res.status(404).json({ success: false, message: 'Physical file not found locally' });
-        res,
-        docFileName,
-        doc.mimeType || (isPdf ? 'application/pdf' : 'application/octet-stream'),
-        false
-      );
-    }
   } catch (err) { next(err); }
 };
 

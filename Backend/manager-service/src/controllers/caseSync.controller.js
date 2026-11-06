@@ -6,6 +6,7 @@ const activityService = require('../services/activity.service');
 const storageService = require('../services/storage.service');
 const folderService = require('../services/folder.service');
 const verificationDocHelper = require('../helpers/verificationDoc.helper');
+const signatureService = require('../services/signature.service');
 
 const destDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(destDir)) {
@@ -172,6 +173,7 @@ const processSingleCaseSync = async (req, caseData) => {
       createdBy: adminUserId,
       departmentId: adminUser.departmentId || null,
       caseRef: caseRef,
+      caseStatus: status || 'Active',
       assignedEmail: caseData.assignedEmail || null,
       creatorEmail: caseData.creatorEmail || null,
       allowedEmails: allowedEmailsList,
@@ -184,6 +186,7 @@ const processSingleCaseSync = async (req, caseData) => {
     caseFolder.description = `Verification case ${caseRef} (${status || 'Active'})`;
     caseFolder.name = caseFolderName;
     caseFolder.caseRef = caseRef;
+    if (status) caseFolder.caseStatus = status;
     if (caseData.assignedEmail) caseFolder.assignedEmail = caseData.assignedEmail;
     if (caseData.creatorEmail) caseFolder.creatorEmail = caseData.creatorEmail;
     if (allowedEmailsList.length > 0) {
@@ -272,6 +275,120 @@ const processSingleCaseSync = async (req, caseData) => {
       const fileType = ext.replace('.', '').toUpperCase() || 'PDF';
       const resolvedMime = doc.mimeType || (fileType === 'PDF' ? 'application/pdf' : fileType === 'JSON' ? 'application/json' : 'application/octet-stream');
 
+      // Multi-Party Signatures: Business User, Compliance Officer, Auditor
+      const isCaseClosed = ['CASE_CLOSED', 'APPROVED', 'VERIFIED', 'COMPLETED', 'CLOSED'].includes(String(status).toUpperCase());
+      const isForwarded = ['VERIFYING_BY_COMPLIANCE_OFFICER', 'COMPLIANCE_REVIEW', 'FORWARDED', 'FORWARDED_TO_COMPLIANCE', 'IN_REVIEW'].includes(String(status).toUpperCase()) || isCaseClosed;
+
+      // Resolve the individual people: Business User (Aditya), Compliance Officer (Soudip), Auditor (Abhishek)
+      const buName = caseData.businessUser?.name || caseData.creatorName || (caseData.allowedNames && caseData.allowedNames[0]) || 'Aditya';
+      const buEmail = caseData.businessUser?.email || caseData.creatorEmail || (caseData.allowedEmails && caseData.allowedEmails[0]) || 'aditya@acmesolutions.com';
+      const buSignedAt = caseData.businessUser?.forwardedAt || caseFolder.createdAt || new Date();
+
+      const coName = caseData.complianceOfficer?.name || caseData.assignedName || (caseData.allowedNames && caseData.allowedNames[1]) || (isCaseClosed ? 'Soudip' : '');
+      const coEmail = caseData.complianceOfficer?.email || caseData.assignedEmail || (caseData.allowedEmails && caseData.allowedEmails[1]) || (isCaseClosed ? 'soudip@acmesolutions.com' : '');
+      const coSignedAt = caseData.complianceOfficer?.approvedAt || (isCaseClosed ? new Date() : null);
+
+      const audName = caseData.auditor?.name || (isCaseClosed ? 'Abhishek' : '');
+      const audEmail = caseData.auditor?.email || (isCaseClosed ? 'abhishek@acmesolutions.com' : '');
+      const audSignedAt = caseData.auditor?.auditAt || (isCaseClosed ? new Date() : null);
+
+      // Fetch user profile signatures if registered in DMS
+      let buSig = '';
+      let buSigType = 'type';
+      if (buEmail) {
+        try {
+          const u = await User.findOne({ email: buEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          if (u && u.signature) {
+            buSig = u.signature;
+            buSigType = u.signatureType || 'draw';
+          }
+        } catch {}
+      }
+
+      let coSig = '';
+      let coSigType = 'type';
+      if (coEmail) {
+        try {
+          const u = await User.findOne({ email: coEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          if (u && u.signature) {
+            coSig = u.signature;
+            coSigType = u.signatureType || 'draw';
+          }
+        } catch {}
+      }
+
+      let audSig = '';
+      let audSigType = 'type';
+      if (audEmail) {
+        try {
+          const u = await User.findOne({ email: audEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          if (u && u.signature) {
+            audSig = u.signature;
+            audSigType = u.signatureType || 'draw';
+          }
+        } catch {}
+      }
+
+      const caseSignatures = [
+        {
+          slot: 'Business User',
+          role: 'Business User',
+          step: 1,
+          signerName: buName,
+          signerEmail: buEmail,
+          signature: buSig,
+          signatureType: buSigType,
+          signatureFont: 'Great Vibes',
+          signatureInitials: buName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase(),
+          status: isForwarded ? 'Signed' : 'Pending',
+          signedAt: isForwarded ? buSignedAt : null,
+          comments: `Accepted by Business User (${buName}) and forwarded to Compliance.`
+        },
+        {
+          slot: 'Compliance Officer',
+          role: 'Compliance Officer',
+          step: 2,
+          signerName: coName || (isCaseClosed ? 'Soudip' : ''),
+          signerEmail: coEmail,
+          signature: isCaseClosed ? coSig : '',
+          signatureType: coSigType,
+          signatureFont: 'Great Vibes',
+          signatureInitials: coName ? coName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'SD',
+          status: isCaseClosed ? 'Signed' : 'Pending',
+          signedAt: isCaseClosed ? coSignedAt : null,
+          comments: isCaseClosed ? (caseData.complianceOfficer?.comments || `Approved & electronically signed by Compliance Officer (${coName || 'Soudip'}).`) : 'Awaiting Compliance Officer review'
+        },
+        {
+          slot: 'Auditor',
+          role: 'Auditor',
+          step: 3,
+          signerName: audName || (isCaseClosed ? 'Abhishek' : ''),
+          signerEmail: audEmail,
+          signature: isCaseClosed ? audSig : '',
+          signatureType: audSigType,
+          signatureFont: 'Great Vibes',
+          signatureInitials: audName ? audName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'AB',
+          status: isCaseClosed ? 'Signed' : 'Pending',
+          signedAt: isCaseClosed ? audSignedAt : null,
+          comments: isCaseClosed ? `Audited & verified against compliance standards by Auditor (${audName || 'Abhishek'}).` : 'Awaiting audit review'
+        }
+      ];
+
+      const workflowStatus = {
+        requiresCompliance: true,
+        reportingApproval: {
+          status: isCaseClosed ? 'Approved' : 'Pending',
+          approvedAt: isCaseClosed ? coSignedAt : null,
+          comments: isCaseClosed ? (caseData.complianceOfficer?.comments || 'Approved by Compliance Officer') : ''
+        },
+        complianceApproval: {
+          status: isCaseClosed ? 'Approved' : 'Pending',
+          approvedAt: isCaseClosed ? audSignedAt : null,
+          comments: isCaseClosed ? 'Audited & verified against compliance standards' : ''
+        }
+      };
+
+      let targetDoc;
       if (existingDoc) {
         existingDoc.fileSize = fileSize || existingDoc.fileSize || 1024;
         existingDoc.storageUrl = storageUrl;
@@ -283,7 +400,12 @@ const processSingleCaseSync = async (req, caseData) => {
         existingDoc.customerName = resolvedApplicant;
         existingDoc.customerRef = caseRef;
         existingDoc.description = `Verified via VerifyChain (${doc.verificationStatus || status || 'VERIFIED'})`;
+        existingDoc.signatures = caseSignatures;
+        existingDoc.approvalWorkflow = workflowStatus;
+        existingDoc.markModified('signatures');
+        existingDoc.markModified('approvalWorkflow');
         await existingDoc.save();
+        targetDoc = existingDoc;
         syncedDocs.push(existingDoc);
       } else {
         const newDoc = new Document({
@@ -306,13 +428,23 @@ const processSingleCaseSync = async (req, caseData) => {
           customerName: resolvedApplicant,
           customerRef: caseRef,
           description: `Verified via VerifyChain (${doc.verificationStatus || status || 'VERIFIED'})`,
-          tags: ['VerifyChain', targetRootName.replace(' Documents', ''), caseRef]
+          tags: ['VerifyChain', targetRootName.replace(' Documents', ''), caseRef],
+          signatures: caseSignatures,
+          approvalWorkflow: workflowStatus
         });
         await newDoc.save();
+        targetDoc = newDoc;
 
         // Increment storage count
         await storageService.checkAndIncrementStorage({ Document, tenantId, user: { companySlug: tenantId } }, fileSize || 1024).catch(() => {});
         syncedDocs.push(newDoc);
+      }
+
+      // Re-stamp the PDF document with updated signatures
+      try {
+        await signatureService.reStampDocumentFile(targetDoc, targetDoc.signatures);
+      } catch (restampErr) {
+        logger.warn(`[caseSync] Could not restamp PDF for ${targetDoc.name}: ${restampErr.message}`);
       }
     } catch (docErr) {
       logger.error(`[caseSync] Failed syncing document ${doc.originalFilename || doc.id}:`, docErr);

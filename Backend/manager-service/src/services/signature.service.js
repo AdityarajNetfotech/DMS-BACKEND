@@ -20,11 +20,11 @@ const createInitialSignatures = (folderCategory = 'General', uploaderUser = {}) 
 
   const slots = [
     {
-      slot: 'Manager (Uploader)',
-      role: 'Manager',
+      slot: 'Business User',
+      role: 'Business User',
       step: 1,
       signerId: uploaderUser._id || uploaderUser.id || null,
-      signerName: uploaderUser.name || 'Manager',
+      signerName: uploaderUser.name || 'Business User',
       signerEmail: uploaderUser.email || '',
       signature: uploaderSignature,
       signatureType: uploaderType,
@@ -35,8 +35,8 @@ const createInitialSignatures = (folderCategory = 'General', uploaderUser = {}) 
       comments: 'Document uploaded & initial e-signature registered.'
     },
     {
-      slot: 'Reporting Manager',
-      role: 'Reporting Manager',
+      slot: 'Compliance Officer',
+      role: 'Compliance Officer',
       step: 2,
       signerId: null,
       signerName: '',
@@ -69,8 +69,8 @@ const createInitialSignatures = (folderCategory = 'General', uploaderUser = {}) 
     });
   } else if (isCompliance) {
     slots.push({
-      slot: 'Compliance Manager',
-      role: 'Compliance Team',
+      slot: 'Auditor',
+      role: 'Auditor',
       step: 3,
       signerId: null,
       signerName: '',
@@ -100,20 +100,25 @@ const applyApproverSignature = (existingSignatures = [], approverUser = {}, role
   let slotIndex = -1;
   const roleLower = (role || '').toLowerCase();
 
-  if (roleLower.includes('reporting')) {
+  if (roleLower.includes('business') || roleLower.includes('uploader') || (roleLower === 'manager' && !roleLower.includes('reporting'))) {
     slotIndex = signatures.findIndex(s => 
-      (s.role && s.role.toLowerCase().includes('reporting')) || 
-      (s.slot && s.slot.toLowerCase().includes('reporting'))
+      (s.role && (s.role.toLowerCase().includes('business') || s.role.toLowerCase().includes('uploader') || (s.role.toLowerCase() === 'manager' && !s.role.toLowerCase().includes('reporting')))) || 
+      (s.slot && (s.slot.toLowerCase().includes('business') || s.slot.toLowerCase().includes('uploader') || s.slot.toLowerCase().includes('manager (uploader)')))
+    );
+  } else if (roleLower.includes('reporting') || roleLower.includes('compliance officer') || roleLower === 'compliance') {
+    slotIndex = signatures.findIndex(s => 
+      (s.role && (s.role.toLowerCase().includes('reporting') || s.role.toLowerCase().includes('compliance officer') || s.role.toLowerCase() === 'compliance')) || 
+      (s.slot && (s.slot.toLowerCase().includes('reporting') || s.slot.toLowerCase().includes('compliance officer')))
     );
   } else if (roleLower.includes('legal')) {
     slotIndex = signatures.findIndex(s => 
       (s.role && s.role.toLowerCase().includes('legal')) || 
       (s.slot && s.slot.toLowerCase().includes('legal'))
     );
-  } else if (roleLower.includes('compliance')) {
+  } else if (roleLower.includes('auditor') || roleLower.includes('compliance manager') || roleLower.includes('compliance team')) {
     slotIndex = signatures.findIndex(s => 
-      (s.role && s.role.toLowerCase().includes('compliance')) || 
-      (s.slot && s.slot.toLowerCase().includes('compliance'))
+      (s.role && (s.role.toLowerCase().includes('auditor') || s.role.toLowerCase().includes('compliance manager') || s.role.toLowerCase().includes('compliance team'))) || 
+      (s.slot && (s.slot.toLowerCase().includes('auditor') || s.slot.toLowerCase().includes('compliance manager')))
     );
   }
 
@@ -221,8 +226,8 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
 
   // ──────────────── 1. Manager (Uploader) Slot ────────────────
   let managerSlotIndex = signatures.findIndex(s => 
-    (s.slot && s.slot.toLowerCase().includes('uploader')) ||
-    (s.role && s.role.toLowerCase() === 'manager' && !s.slot.toLowerCase().includes('reporting'))
+    (s.slot && (s.slot.toLowerCase().includes('uploader') || s.slot.toLowerCase().includes('business user') || s.slot.toLowerCase().includes('manager (uploader)'))) ||
+    (s.role && (s.role.toLowerCase().includes('business') || (s.role.toLowerCase() === 'manager' && !s.slot.toLowerCase().includes('reporting'))))
   );
 
   let uploaderUser = null;
@@ -234,12 +239,12 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   const uploaderType = (uploaderUser && uploaderUser.signatureType) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureType : 'draw');
   const uploaderFont = (uploaderUser && uploaderUser.signatureFont) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureFont : 'Great Vibes');
   const uploaderInitials = (uploaderUser && uploaderUser.signatureInitials) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureInitials : '');
-  const uploaderName = (uploaderUser && uploaderUser.name) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerName : 'Manager');
+  const uploaderName = (uploaderUser && uploaderUser.name) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerName : 'Business User');
   const uploaderEmail = (uploaderUser && uploaderUser.email) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerEmail : '');
 
   const managerSlot = {
-    slot: 'Manager (Uploader)',
-    role: 'Manager',
+    slot: 'Business User',
+    role: 'Business User',
     step: 1,
     signerId: (uploaderUser && uploaderUser._id) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerId : null),
     signerName: uploaderName,
@@ -261,8 +266,8 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
 
   // ──────────────── 2. Reporting Manager Slot ────────────────
   let repSlotIndex = signatures.findIndex(s =>
-    (s.slot && s.slot.toLowerCase().includes('reporting')) ||
-    (s.role && s.role.toLowerCase().includes('reporting'))
+    (s.slot && (s.slot.toLowerCase().includes('reporting') || s.slot.toLowerCase().includes('compliance officer'))) ||
+    (s.role && (s.role.toLowerCase().includes('reporting') || s.role.toLowerCase().includes('compliance officer')))
   );
 
   const repApproval = wf.reportingApproval;
@@ -279,12 +284,12 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   const repType = (repUser && repUser.signatureType) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureType : 'draw');
   const repFont = (repUser && repUser.signatureFont) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureFont : 'Great Vibes');
   const repInitials = (repUser && repUser.signatureInitials) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureInitials : '');
-  const repName = (repUser && repUser.name) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerName : (isRepApproved ? 'Reporting Manager' : 'Required Role'));
+  const repName = (repUser && repUser.name) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerName : (isRepApproved ? 'Compliance Officer' : 'Required Role'));
   const repEmail = (repUser && repUser.email) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerEmail : '');
 
   const repSlot = {
-    slot: 'Reporting Manager',
-    role: 'Reporting Manager',
+    slot: 'Compliance Officer',
+    role: 'Compliance Officer',
     step: 2,
     signerId: (repUser && repUser._id) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerId : null),
     signerName: repName,
@@ -354,8 +359,8 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   // ──────────────── 4. Compliance Manager Slot (if required) ────────────────
   if (isCompliance) {
     let compSlotIndex = signatures.findIndex(s =>
-      (s.slot && s.slot.toLowerCase().includes('compliance')) ||
-      (s.role && s.role.toLowerCase().includes('compliance'))
+      (s.slot && (s.slot.toLowerCase().includes('compliance') || s.slot.toLowerCase().includes('auditor'))) ||
+      (s.role && (s.role.toLowerCase().includes('compliance') || s.role.toLowerCase().includes('auditor')))
     );
 
     const compApproval = wf.complianceApproval;
@@ -372,12 +377,12 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
     const compType = (compUser && compUser.signatureType) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureType : 'draw');
     const compFont = (compUser && compUser.signatureFont) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureFont : 'Great Vibes');
     const compInitials = (compUser && compUser.signatureInitials) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureInitials : '');
-    const compName = (compUser && compUser.name) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerName : (isCompApproved ? 'Compliance Manager' : 'Required Role'));
+    const compName = (compUser && compUser.name) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerName : (isCompApproved ? 'Auditor' : 'Required Role'));
     const compEmail = (compUser && compUser.email) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerEmail : '');
 
     const compSlot = {
-      slot: 'Compliance Manager',
-      role: 'Compliance Team',
+      slot: 'Auditor',
+      role: 'Auditor',
       step: signatures.length + 1,
       signerId: (compUser && compUser._id) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerId : null),
       signerName: compName,

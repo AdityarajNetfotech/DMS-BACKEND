@@ -141,6 +141,20 @@ const isFolderAccessible = async (folder, userId, tenantId, Folder, Share, userR
 
   // Case folder access validation
   if (folder.caseRef || (folder.allowedEmails && folder.allowedEmails.length > 0)) {
+    // If user is Auditor, they have read access to any case that is CLOSED by Compliance Officer
+    if (userInfo?.isAuditor) {
+      const statusUpper = String(folder.caseStatus || '').toUpperCase();
+      const descUpper = String(folder.description || '').toUpperCase();
+      const isClosed = statusUpper === 'CASE_CLOSED' ||
+                       statusUpper === 'CLOSED' ||
+                       statusUpper === 'COMPLETED' ||
+                       descUpper.includes('CASE_CLOSED') ||
+                       descUpper.includes('(CLOSED)');
+      if (isClosed) {
+        return { accessible: true, uploadAllowed: false };
+      }
+    }
+
     const userEmail = userInfo?.userEmail || '';
     const userName = userInfo?.userName || '';
     const allowedEmails = (folder.allowedEmails || []).map(e => String(e).toLowerCase());
@@ -276,44 +290,55 @@ const getFolderDetails = async (req, res, next) => {
     const isSystemRoot = folder.isSystemFolder || SYSTEM_FOLDER_NAMES.includes(folder.name);
     if (!userInfo.isAdmin) {
       if (isSystemRoot) {
-        // Under a system root folder (KYC, KYB, etc.): only show case folders the user worked on or created
-        const caseConditions = [];
-        if (userInfo.userEmail) {
-          caseConditions.push({ allowedEmails: userInfo.userEmail });
-          caseConditions.push({ assignedEmail: userInfo.userEmail });
-          caseConditions.push({ creatorEmail: userInfo.userEmail });
-        }
-        if (userInfo.userName) {
-          caseConditions.push({ allowedNames: userInfo.userName });
-        }
-        if (userInfo.userObjectId) {
-          caseConditions.push({ createdBy: userInfo.userObjectId });
-        }
-        if (userInfo.userId) {
-          caseConditions.push({ createdBy: userInfo.userId });
-        }
+        if (userInfo.isAuditor) {
+          // Auditor should ONLY see cases that are CLOSED by the compliance officer
+          childFoldersQuery.$or = [
+            { caseStatus: { $in: ['CLOSED', 'CASE_CLOSED', 'Closed', 'case_closed', 'COMPLETED', 'Completed'] } },
+            { description: { $regex: /CASE_CLOSED|\(CLOSED\)/i } },
+            ...(userInfo.userObjectId ? [{ createdBy: userInfo.userObjectId }] : []),
+            ...(userInfo.userId ? [{ createdBy: userInfo.userId }] : [])
+          ];
+        } else {
+          // Under a system root folder (KYC, KYB, etc.): only show case folders the user worked on or created
+          const caseConditions = [];
+          if (userInfo.userEmail) {
+            caseConditions.push({ allowedEmails: userInfo.userEmail });
+            caseConditions.push({ assignedEmail: userInfo.userEmail });
+            caseConditions.push({ creatorEmail: userInfo.userEmail });
+          }
+          if (userInfo.userName) {
+            caseConditions.push({ allowedNames: userInfo.userName });
+          }
+          if (userInfo.userObjectId) {
+            caseConditions.push({ createdBy: userInfo.userObjectId });
+          }
+          if (userInfo.userId) {
+            caseConditions.push({ createdBy: userInfo.userId });
+          }
 
-        if (caseConditions.length > 0) {
-          childFoldersQuery.$or = caseConditions;
-        }
+          if (caseConditions.length > 0) {
+            childFoldersQuery.$or = caseConditions;
+          }
 
-        // Auditor-created folders can NEVER be seen by compliance officers or business users
-        if (!userInfo.isAuditor) {
+          // Auditor-created folders can NEVER be seen by compliance officers or business users
           childFoldersQuery.isAuditorFolder = { $ne: true };
           childFoldersQuery.creatorRole = { $ne: 'auditor' };
         }
       } else {
-        // Under a case folder or custom subfolder: custom subfolders are ONLY visible to their creator
-        const allowedCreatedBy = [];
-        if (userInfo.userObjectId) allowedCreatedBy.push(userInfo.userObjectId);
-        if (userInfo.userId) allowedCreatedBy.push(userInfo.userId);
+        // Under a case folder or custom subfolder
+        if (userInfo.isAuditor) {
+          childFoldersQuery.isAuditorFolder = { $in: [true, false, null] };
+        } else {
+          // Under a case folder or custom subfolder: custom subfolders are ONLY visible to their creator
+          const allowedCreatedBy = [];
+          if (userInfo.userObjectId) allowedCreatedBy.push(userInfo.userObjectId);
+          if (userInfo.userId) allowedCreatedBy.push(userInfo.userId);
 
-        childFoldersQuery.$or = [
-          { createdBy: { $in: allowedCreatedBy } }
-        ];
+          childFoldersQuery.$or = [
+            { createdBy: { $in: allowedCreatedBy } }
+          ];
 
-        // Auditor-created folders can NEVER be seen by compliance officers or business users
-        if (!userInfo.isAuditor) {
+          // Auditor-created folders can NEVER be seen by compliance officers or business users
           childFoldersQuery.isAuditorFolder = { $ne: true };
           childFoldersQuery.creatorRole = { $ne: 'auditor' };
         }
