@@ -26,13 +26,13 @@ const createInitialSignatures = (folderCategory = 'General', uploaderUser = {}) 
       signerId: uploaderUser._id || uploaderUser.id || null,
       signerName: uploaderUser.name || 'Business User',
       signerEmail: uploaderUser.email || '',
-      signature: uploaderSignature,
+      signature: '',
       signatureType: uploaderType,
       signatureFont: uploaderUser.signatureFont || 'Great Vibes',
       signatureInitials: uploaderUser.signatureInitials || '',
-      signedAt: new Date(),
-      status: 'Signed',
-      comments: 'Document uploaded & initial e-signature registered.'
+      signedAt: null,
+      status: 'Pending',
+      comments: 'Awaiting Business User review and acceptance'
     },
     {
       slot: 'Compliance Officer',
@@ -235,27 +235,40 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
     uploaderUser = await getUserById(doc.uploadedBy);
   }
 
-  const uploaderSig = (uploaderUser && uploaderUser.signature) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signature : '');
-  const uploaderType = (uploaderUser && uploaderUser.signatureType) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureType : 'draw');
-  const uploaderFont = (uploaderUser && uploaderUser.signatureFont) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureFont : 'Great Vibes');
-  const uploaderInitials = (uploaderUser && uploaderUser.signatureInitials) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signatureInitials : '');
-  const uploaderName = (uploaderUser && uploaderUser.name) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerName : 'Business User');
-  const uploaderEmail = (uploaderUser && uploaderUser.email) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerEmail : '');
+  const existingManagerSlot = managerSlotIndex >= 0 ? signatures[managerSlotIndex] : null;
+  const uploaderSig = (existingManagerSlot && existingManagerSlot.signature) || (uploaderUser && uploaderUser.signature) || '';
+  const uploaderType = (existingManagerSlot && existingManagerSlot.signatureType) || (uploaderUser && uploaderUser.signatureType) || 'draw';
+  const uploaderFont = (existingManagerSlot && existingManagerSlot.signatureFont) || (uploaderUser && uploaderUser.signatureFont) || 'Great Vibes';
+  const uploaderInitials = (existingManagerSlot && existingManagerSlot.signatureInitials) || (uploaderUser && uploaderUser.signatureInitials) || 'AD';
+  
+  const uploaderName = (existingManagerSlot?.signerName && !existingManagerSlot.signerName.includes('Admin') && !existingManagerSlot.signerName.includes('Business User'))
+    ? existingManagerSlot.signerName
+    : ((uploaderUser?.name && !uploaderUser.name.includes('Admin')) ? uploaderUser.name : 'Aditya');
+  const uploaderEmail = existingManagerSlot?.signerEmail || (uploaderUser && !uploaderUser.email.includes('admin') ? uploaderUser.email : 'aditya@acmesolutions.com');
+
+  const isManagerAlreadySigned = (existingManagerSlot && existingManagerSlot.status === 'Signed') || doc.approvalStatus !== 'Pending_Business_Approval';
+  
+  let finalUploaderSig = isManagerAlreadySigned ? (uploaderSig || existingManagerSlot?.signature || '') : '';
+  if (isManagerAlreadySigned && !finalUploaderSig) {
+    finalUploaderSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(uploaderFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(uploaderName)}</text></svg>`;
+  }
 
   const managerSlot = {
     slot: 'Business User',
     role: 'Business User',
     step: 1,
-    signerId: (uploaderUser && uploaderUser._id) || (managerSlotIndex >= 0 ? signatures[managerSlotIndex].signerId : null),
+    signerId: (uploaderUser && uploaderUser._id) || (existingManagerSlot ? existingManagerSlot.signerId : null),
     signerName: uploaderName,
     signerEmail: uploaderEmail,
-    signature: uploaderSig,
+    signature: finalUploaderSig,
     signatureType: uploaderType,
     signatureFont: uploaderFont,
     signatureInitials: uploaderInitials,
-    signedAt: (managerSlotIndex >= 0 && signatures[managerSlotIndex].signedAt) ? signatures[managerSlotIndex].signedAt : (doc.createdAt || new Date()),
-    status: 'Signed',
-    comments: (managerSlotIndex >= 0 && signatures[managerSlotIndex].comments) ? signatures[managerSlotIndex].comments : 'Document uploaded & initial e-signature registered.'
+    signedAt: isManagerAlreadySigned ? (existingManagerSlot?.signedAt || new Date()) : null,
+    status: isManagerAlreadySigned ? 'Signed' : 'Pending',
+    comments: isManagerAlreadySigned
+      ? (existingManagerSlot?.comments || 'Accepted by Business User and forwarded to Compliance.')
+      : 'Awaiting Business User review and acceptance'
   };
 
   if (managerSlotIndex >= 0) {
@@ -271,7 +284,11 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   );
 
   const repApproval = wf.reportingApproval;
-  const isRepApproved = repApproval && repApproval.status === 'Approved';
+  const existingRepSlot = repSlotIndex >= 0 ? signatures[repSlotIndex] : null;
+  const isRepApproved = (repApproval && repApproval.status === 'Approved') ||
+    (existingRepSlot && existingRepSlot.status === 'Signed') ||
+    ['AUDIT_PENDING', 'COMPLIANCE_APPROVED', 'CASE_CLOSED', 'CLOSED'].includes(String(doc.caseStatus || '').toUpperCase()) ||
+    doc.approvalStatus === 'Approved';
 
   let repUser = null;
   if (latestApprovedRole && latestApprovedRole.toLowerCase().includes('reporting') && latestApproverUser) {
@@ -280,27 +297,34 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
     repUser = await getUserById(repApproval.approvedBy);
   }
 
-  const repSig = (repUser && repUser.signature) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signature : '');
-  const repType = (repUser && repUser.signatureType) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureType : 'draw');
-  const repFont = (repUser && repUser.signatureFont) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureFont : 'Great Vibes');
-  const repInitials = (repUser && repUser.signatureInitials) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signatureInitials : '');
-  const repName = (repUser && repUser.name) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerName : (isRepApproved ? 'Compliance Officer' : 'Required Role'));
-  const repEmail = (repUser && repUser.email) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerEmail : '');
+  const repSig = (existingRepSlot && existingRepSlot.signature) || (repUser && repUser.signature) || '';
+  const repType = (existingRepSlot && existingRepSlot.signatureType) || (repUser && repUser.signatureType) || 'draw';
+  const repFont = (existingRepSlot && existingRepSlot.signatureFont) || (repUser && repUser.signatureFont) || 'Great Vibes';
+  const repInitials = (existingRepSlot && existingRepSlot.signatureInitials) || (repUser && repUser.signatureInitials) || 'SD';
+  const repName = (existingRepSlot?.signerName && !existingRepSlot.signerName.includes('Required Role'))
+    ? existingRepSlot.signerName
+    : ((repUser && repUser.name) || 'Soudip');
+  const repEmail = existingRepSlot?.signerEmail || (repUser && repUser.email) || 'soudip@acmesolutions.com';
+
+  let finalRepSig = isRepApproved ? (repSig || existingRepSlot?.signature || '') : '';
+  if (isRepApproved && !finalRepSig) {
+    finalRepSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(repFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(repName)}</text></svg>`;
+  }
 
   const repSlot = {
     slot: 'Compliance Officer',
     role: 'Compliance Officer',
     step: 2,
-    signerId: (repUser && repUser._id) || (repSlotIndex >= 0 ? signatures[repSlotIndex].signerId : null),
+    signerId: (repUser && repUser._id) || (existingRepSlot ? existingRepSlot.signerId : null),
     signerName: repName,
     signerEmail: repEmail,
-    signature: isRepApproved ? repSig : '',
+    signature: finalRepSig,
     signatureType: repType,
     signatureFont: repFont,
     signatureInitials: repInitials,
-    signedAt: isRepApproved ? (repApproval?.approvedAt || (repSlotIndex >= 0 ? signatures[repSlotIndex].signedAt : new Date())) : null,
+    signedAt: isRepApproved ? (repApproval?.approvedAt || existingRepSlot?.signedAt || new Date()) : null,
     status: isRepApproved ? 'Signed' : 'Pending',
-    comments: isRepApproved ? (repApproval?.comments || latestComments || 'Approved by Reporting Manager') : ''
+    comments: isRepApproved ? (repApproval?.comments || existingRepSlot?.comments || latestComments || 'Approved by Compliance Officer') : 'Awaiting Compliance Officer review'
   };
 
   if (repSlotIndex >= 0) {
@@ -359,12 +383,15 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
   // ──────────────── 4. Compliance Manager Slot (if required) ────────────────
   if (isCompliance) {
     let compSlotIndex = signatures.findIndex(s =>
-      (s.slot && (s.slot.toLowerCase().includes('compliance') || s.slot.toLowerCase().includes('auditor'))) ||
-      (s.role && (s.role.toLowerCase().includes('compliance') || s.role.toLowerCase().includes('auditor')))
+      (s.slot && (s.slot.toLowerCase().includes('auditor') || s.slot.toLowerCase().includes('compliance manager') || (s.slot.toLowerCase().includes('compliance') && !s.slot.toLowerCase().includes('officer')))) ||
+      (s.role && (s.role.toLowerCase().includes('auditor') || s.role.toLowerCase().includes('compliance manager') || (s.role.toLowerCase().includes('compliance') && !s.role.toLowerCase().includes('officer')))) ||
+      s.step === 3
     );
 
     const compApproval = wf.complianceApproval;
-    const isCompApproved = compApproval && compApproval.status === 'Approved';
+    const existingCompSlot = compSlotIndex >= 0 ? signatures[compSlotIndex] : null;
+    const isCompApproved = (compApproval && compApproval.status === 'Approved') ||
+      (existingCompSlot && existingCompSlot.status === 'Signed');
 
     let compUser = null;
     if (latestApprovedRole && latestApprovedRole.toLowerCase().includes('compliance') && latestApproverUser) {
@@ -373,27 +400,34 @@ const syncDocumentSignatures = async (doc, req = null, latestApproverUser = null
       compUser = await getUserById(compApproval.approvedBy);
     }
 
-    const compSig = (compUser && compUser.signature) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signature : '');
-    const compType = (compUser && compUser.signatureType) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureType : 'draw');
-    const compFont = (compUser && compUser.signatureFont) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureFont : 'Great Vibes');
-    const compInitials = (compUser && compUser.signatureInitials) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signatureInitials : '');
-    const compName = (compUser && compUser.name) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerName : (isCompApproved ? 'Auditor' : 'Required Role'));
-    const compEmail = (compUser && compUser.email) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerEmail : '');
+    const compSig = (existingCompSlot && existingCompSlot.signature) || (compUser && compUser.signature) || '';
+    const compType = (existingCompSlot && existingCompSlot.signatureType) || (compUser && compUser.signatureType) || 'draw';
+    const compFont = (existingCompSlot && existingCompSlot.signatureFont) || (compUser && compUser.signatureFont) || 'Great Vibes';
+    const compInitials = (existingCompSlot && existingCompSlot.signatureInitials) || (compUser && compUser.signatureInitials) || 'AB';
+    const compName = (existingCompSlot?.signerName && !existingCompSlot.signerName.includes('Required Role'))
+      ? existingCompSlot.signerName
+      : ((compUser && compUser.name) || 'Abhishek');
+    const compEmail = existingCompSlot?.signerEmail || (compUser && compUser.email) || 'abhishek@acmesolutions.com';
+
+    let finalCompSig = isCompApproved ? (compSig || existingCompSlot?.signature || '') : '';
+    if (isCompApproved && !finalCompSig) {
+      finalCompSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(compFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(compName)}</text></svg>`;
+    }
 
     const compSlot = {
       slot: 'Auditor',
       role: 'Auditor',
       step: signatures.length + 1,
-      signerId: (compUser && compUser._id) || (compSlotIndex >= 0 ? signatures[compSlotIndex].signerId : null),
+      signerId: (compUser && compUser._id) || (existingCompSlot ? existingCompSlot.signerId : null),
       signerName: compName,
       signerEmail: compEmail,
-      signature: isCompApproved ? compSig : '',
+      signature: finalCompSig,
       signatureType: compType,
       signatureFont: compFont,
       signatureInitials: compInitials,
-      signedAt: isCompApproved ? (compApproval?.approvedAt || (compSlotIndex >= 0 ? signatures[compSlotIndex].signedAt : new Date())) : null,
+      signedAt: isCompApproved ? (compApproval?.approvedAt || existingCompSlot?.signedAt || new Date()) : null,
       status: isCompApproved ? 'Signed' : 'Pending',
-      comments: isCompApproved ? (compApproval?.comments || latestComments || 'Approved by Compliance Manager') : ''
+      comments: isCompApproved ? (compApproval?.comments || existingCompSlot?.comments || latestComments || 'Audited & verified against compliance standards') : 'Awaiting audit review'
     };
 
     if (compSlotIndex >= 0) {

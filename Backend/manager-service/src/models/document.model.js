@@ -245,6 +245,7 @@ const documentSchema = new mongoose.Schema({
   approvalStatus: {
     type: String,
     enum: [
+      'Pending_Business_Approval',
       'Pending_Reporting_Approval',
       'Pending_Legal_Approval',
       'Pending_Compliance_Approval',

@@ -275,58 +275,109 @@ const processSingleCaseSync = async (req, caseData) => {
       const fileType = ext.replace('.', '').toUpperCase() || 'PDF';
       const resolvedMime = doc.mimeType || (fileType === 'PDF' ? 'application/pdf' : fileType === 'JSON' ? 'application/json' : 'application/octet-stream');
 
-      // Multi-Party Signatures: Business User, Compliance Officer, Auditor
-      const isCaseClosed = ['CASE_CLOSED', 'APPROVED', 'VERIFIED', 'COMPLETED', 'CLOSED'].includes(String(status).toUpperCase());
-      const isForwarded = ['VERIFYING_BY_COMPLIANCE_OFFICER', 'COMPLIANCE_REVIEW', 'FORWARDED', 'FORWARDED_TO_COMPLIANCE', 'IN_REVIEW'].includes(String(status).toUpperCase()) || isCaseClosed;
+      // Multi-Party Signatures: Business User (Slot 1), Compliance Officer (Slot 2), Auditor (Slot 3)
+      // Slot 3 (Auditor): STRICTLY true ONLY when Auditor explicitly signs
+      const isAuditorSigned = Boolean(
+        caseData.auditor && (caseData.auditor.isSigned === true || caseData.auditor.signedAt || caseData.auditor.auditAt)
+      );
+
+      // Slot 2 (Compliance Officer): STRICTLY true when CO approves or Auditor has signed
+      const isComplianceApproved = Boolean(
+        (caseData.complianceOfficer && (caseData.complianceOfficer.decision === 'APPROVED' || caseData.complianceOfficer.approvedAt)) ||
+        ['AUDIT_PENDING', 'COMPLIANCE_APPROVED', 'CASE_CLOSED', 'CLOSED'].includes(String(status).toUpperCase()) ||
+        isAuditorSigned
+      );
+
+      // Slot 1 (Business User): STRICTLY true ONLY when BU forwards to compliance, or CO/Auditor has signed
+      const isForwarded = Boolean(
+        (caseData.businessUser && (caseData.businessUser.isForwarded === true || caseData.businessUser.forwardedAt)) ||
+        ['VERIFYING_BY_COMPLIANCE_OFFICER', 'COMPLIANCE_REVIEW', 'FORWARDED', 'FORWARDED_TO_COMPLIANCE', 'COMPLIANCE_FORWARD'].includes(String(status).toUpperCase()) ||
+        isComplianceApproved ||
+        isAuditorSigned
+      );
 
       // Resolve the individual people: Business User (Aditya), Compliance Officer (Soudip), Auditor (Abhishek)
-      const buName = caseData.businessUser?.name || caseData.creatorName || (caseData.allowedNames && caseData.allowedNames[0]) || 'Aditya';
+      const buName = (caseData.businessUser?.name && !caseData.businessUser.name.toLowerCase().includes('business user'))
+        ? caseData.businessUser.name
+        : (caseData.creatorName || (caseData.allowedNames && caseData.allowedNames[0]) || 'Aditya');
       const buEmail = caseData.businessUser?.email || caseData.creatorEmail || (caseData.allowedEmails && caseData.allowedEmails[0]) || 'aditya@acmesolutions.com';
-      const buSignedAt = caseData.businessUser?.forwardedAt || caseFolder.createdAt || new Date();
+      const buSignedAt = isForwarded ? (caseData.businessUser?.forwardedAt || new Date()) : null;
 
-      const coName = caseData.complianceOfficer?.name || caseData.assignedName || (caseData.allowedNames && caseData.allowedNames[1]) || (isCaseClosed ? 'Soudip' : '');
-      const coEmail = caseData.complianceOfficer?.email || caseData.assignedEmail || (caseData.allowedEmails && caseData.allowedEmails[1]) || (isCaseClosed ? 'soudip@acmesolutions.com' : '');
-      const coSignedAt = caseData.complianceOfficer?.approvedAt || (isCaseClosed ? new Date() : null);
+      const rawCoName = caseData.complianceOfficer?.name || caseData.assignedName || '';
+      const coName = (rawCoName && !rawCoName.toLowerCase().includes('compliance officer') && !/mohit/i.test(rawCoName))
+        ? rawCoName
+        : 'Soudip';
+      const rawCoEmail = caseData.complianceOfficer?.email || caseData.assignedEmail || '';
+      const coEmail = (rawCoEmail && rawCoEmail.includes('@') && !/mohit/i.test(rawCoEmail))
+        ? rawCoEmail
+        : 'soudip@acmesolutions.com';
+      const coSignedAt = caseData.complianceOfficer?.approvedAt || (isComplianceApproved ? new Date() : null);
 
-      const audName = caseData.auditor?.name || (isCaseClosed ? 'Abhishek' : '');
-      const audEmail = caseData.auditor?.email || (isCaseClosed ? 'abhishek@acmesolutions.com' : '');
-      const audSignedAt = caseData.auditor?.auditAt || (isCaseClosed ? new Date() : null);
+      const audName = (caseData.auditor?.name && !caseData.auditor.name.toLowerCase().includes('auditor'))
+        ? caseData.auditor.name
+        : 'Abhishek';
+      const audEmail = (caseData.auditor?.email && !caseData.auditor.email.includes('audit.local'))
+        ? caseData.auditor.email
+        : 'abhishek@acmesolutions.com';
+      const audSignedAt = isAuditorSigned ? (caseData.auditor?.auditAt || caseData.auditor?.signedAt || new Date()) : null;
 
       // Fetch user profile signatures if registered in DMS
       let buSig = '';
       let buSigType = 'type';
+      let buSigFont = 'Great Vibes';
+      let buSigInitials = buName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase();
       if (buEmail) {
         try {
-          const u = await User.findOne({ email: buEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          const u = await User.findOne({ email: buEmail, isDeleted: { $ne: true } }).select('signature signatureType signatureFont signatureInitials');
           if (u && u.signature) {
             buSig = u.signature;
             buSigType = u.signatureType || 'draw';
+            buSigFont = u.signatureFont || buSigFont;
+            buSigInitials = u.signatureInitials || buSigInitials;
           }
         } catch {}
       }
 
       let coSig = '';
       let coSigType = 'type';
+      let coSigFont = 'Great Vibes';
+      let coSigInitials = coName ? coName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'SD';
       if (coEmail) {
         try {
-          const u = await User.findOne({ email: coEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          const u = await User.findOne({ email: coEmail, isDeleted: { $ne: true } }).select('signature signatureType signatureFont signatureInitials');
           if (u && u.signature) {
             coSig = u.signature;
             coSigType = u.signatureType || 'draw';
+            coSigFont = u.signatureFont || coSigFont;
+            coSigInitials = u.signatureInitials || coSigInitials;
           }
         } catch {}
       }
 
       let audSig = '';
       let audSigType = 'type';
+      let audSigFont = 'Great Vibes';
+      let audSigInitials = audName ? audName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'AB';
       if (audEmail) {
         try {
-          const u = await User.findOne({ email: audEmail, isDeleted: { $ne: true } }).select('signature signatureType');
+          const u = await User.findOne({ email: audEmail, isDeleted: { $ne: true } }).select('signature signatureType signatureFont signatureInitials');
           if (u && u.signature) {
             audSig = u.signature;
             audSigType = u.signatureType || 'draw';
+            audSigFont = u.signatureFont || audSigFont;
+            audSigInitials = u.signatureInitials || audSigInitials;
           }
         } catch {}
+      }
+
+      if (!buSig && isForwarded) {
+        buSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(buSigFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(buName)}</text></svg>`;
+      }
+      if (!coSig && isComplianceApproved) {
+        coSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(coSigFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(coName)}</text></svg>`;
+      }
+      if (!audSig && isAuditorSigned) {
+        audSig = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(audSigFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(audName)}</text></svg>`;
       }
 
       const caseSignatures = [
@@ -336,78 +387,135 @@ const processSingleCaseSync = async (req, caseData) => {
           step: 1,
           signerName: buName,
           signerEmail: buEmail,
-          signature: buSig,
+          signature: isForwarded ? buSig : '',
           signatureType: buSigType,
-          signatureFont: 'Great Vibes',
-          signatureInitials: buName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase(),
+          signatureFont: buSigFont,
+          signatureInitials: buSigInitials,
           status: isForwarded ? 'Signed' : 'Pending',
           signedAt: isForwarded ? buSignedAt : null,
-          comments: `Accepted by Business User (${buName}) and forwarded to Compliance.`
+          comments: isForwarded
+            ? `Accepted by Business User (${buName}) and forwarded to Compliance.`
+            : 'Awaiting Business User review and acceptance'
         },
         {
           slot: 'Compliance Officer',
           role: 'Compliance Officer',
           step: 2,
-          signerName: coName || (isCaseClosed ? 'Soudip' : ''),
+          signerName: coName,
           signerEmail: coEmail,
-          signature: isCaseClosed ? coSig : '',
+          signature: isComplianceApproved ? coSig : '',
           signatureType: coSigType,
-          signatureFont: 'Great Vibes',
-          signatureInitials: coName ? coName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'SD',
-          status: isCaseClosed ? 'Signed' : 'Pending',
-          signedAt: isCaseClosed ? coSignedAt : null,
-          comments: isCaseClosed ? (caseData.complianceOfficer?.comments || `Approved & electronically signed by Compliance Officer (${coName || 'Soudip'}).`) : 'Awaiting Compliance Officer review'
+          signatureFont: coSigFont,
+          signatureInitials: coSigInitials,
+          status: isComplianceApproved ? 'Signed' : 'Pending',
+          signedAt: isComplianceApproved ? coSignedAt : null,
+          comments: isComplianceApproved ? (caseData.complianceOfficer?.comments || `Approved & electronically signed by Compliance Officer (${coName}).`) : 'Awaiting Compliance Officer review'
         },
         {
           slot: 'Auditor',
           role: 'Auditor',
           step: 3,
-          signerName: audName || (isCaseClosed ? 'Abhishek' : ''),
+          signerName: audName,
           signerEmail: audEmail,
-          signature: isCaseClosed ? audSig : '',
+          signature: isAuditorSigned ? audSig : '',
           signatureType: audSigType,
-          signatureFont: 'Great Vibes',
-          signatureInitials: audName ? audName.split(' ').map(n => n[0]).join('').substring(0, 3).toUpperCase() : 'AB',
-          status: isCaseClosed ? 'Signed' : 'Pending',
-          signedAt: isCaseClosed ? audSignedAt : null,
-          comments: isCaseClosed ? `Audited & verified against compliance standards by Auditor (${audName || 'Abhishek'}).` : 'Awaiting audit review'
+          signatureFont: audSigFont,
+          signatureInitials: audSigInitials,
+          status: isAuditorSigned ? 'Signed' : 'Pending',
+          signedAt: isAuditorSigned ? audSignedAt : null,
+          comments: isAuditorSigned
+            ? (caseData.auditor?.comments || `Audited & verified against compliance standards by Auditor (${audName}).`)
+            : 'Awaiting audit review'
         }
       ];
 
       const workflowStatus = {
         requiresCompliance: true,
         reportingApproval: {
-          status: isCaseClosed ? 'Approved' : 'Pending',
-          approvedAt: isCaseClosed ? coSignedAt : null,
-          comments: isCaseClosed ? (caseData.complianceOfficer?.comments || 'Approved by Compliance Officer') : ''
+          status: isComplianceApproved ? 'Approved' : 'Pending',
+          approvedAt: isComplianceApproved ? coSignedAt : null,
+          comments: isComplianceApproved ? (caseData.complianceOfficer?.comments || 'Approved by Compliance Officer') : ''
         },
         complianceApproval: {
-          status: isCaseClosed ? 'Approved' : 'Pending',
-          approvedAt: isCaseClosed ? audSignedAt : null,
-          comments: isCaseClosed ? 'Audited & verified against compliance standards' : ''
+          status: isAuditorSigned ? 'Approved' : 'Pending',
+          approvedAt: isAuditorSigned ? audSignedAt : null,
+          comments: isAuditorSigned ? 'Audited & verified against compliance standards' : ''
         }
       };
 
       let targetDoc;
       if (existingDoc) {
-        existingDoc.fileSize = fileSize || existingDoc.fileSize || 1024;
-        existingDoc.storageUrl = storageUrl;
-        existingDoc.status = 'Active';
-        existingDoc.approvalStatus = 'Approved';
-        existingDoc.validationStatus = 'Valid';
-        existingDoc.isVerified = true;
-        existingDoc.documentType = docCategory;
-        existingDoc.customerName = resolvedApplicant;
-        existingDoc.customerRef = caseRef;
-        existingDoc.description = `Verified via VerifyChain (${doc.verificationStatus || status || 'VERIFIED'})`;
-        existingDoc.signatures = caseSignatures;
-        existingDoc.approvalWorkflow = workflowStatus;
-        existingDoc.markModified('signatures');
-        existingDoc.markModified('approvalWorkflow');
-        await existingDoc.save();
-        targetDoc = existingDoc;
-        syncedDocs.push(existingDoc);
+        // Enforce exact 4-step progressive multi-party signature matrix:
+        // Step 1 (Business User): Stays 'Signed' once forwarded or once any subsequent approval occurs.
+        // Step 2 (Compliance Officer): 'Signed' when Compliance Officer approves or Auditor signs.
+        // Step 3 (Auditor): 'Signed' strictly when Auditor completes audit; otherwise strictly 'Pending'.
+        if (Array.isArray(existingDoc.signatures) && existingDoc.signatures.length > 0) {
+          caseSignatures.forEach((slot, idx) => {
+            const oldSlot = existingDoc.signatures.find(s => s.slot === slot.slot || s.role === slot.role || s.step === slot.step);
+            
+            // Step 1 (Business User) and Step 2 (Compliance Officer) must never be wiped if previously signed or currently approved
+            const isSlot1Signed = idx === 0 && (isForwarded || isComplianceApproved || isAuditorSigned || oldSlot?.status === 'Signed');
+            const isSlot2Signed = idx === 1 && (isComplianceApproved || isAuditorSigned || oldSlot?.status === 'Signed');
+            const isSlot3Signed = idx === 2 && isAuditorSigned;
+
+            const shouldBeSigned = isSlot1Signed || isSlot2Signed || isSlot3Signed || slot.status === 'Signed';
+
+            if (shouldBeSigned) {
+              caseSignatures[idx].status = 'Signed';
+              caseSignatures[idx].signature = slot.signature || oldSlot?.signature || '';
+              caseSignatures[idx].signatureType = oldSlot?.signatureType || slot.signatureType || 'draw';
+              caseSignatures[idx].signatureFont = oldSlot?.signatureFont || slot.signatureFont || 'Great Vibes';
+              caseSignatures[idx].signatureInitials = oldSlot?.signatureInitials || slot.signatureInitials || (idx === 0 ? 'AD' : idx === 1 ? 'SD' : 'AB');
+              caseSignatures[idx].signedAt = slot.signedAt || oldSlot?.signedAt || new Date();
+
+              // Guaranteed valid visual signature: If still empty, synthesize high-resolution SVG signature
+              if (!caseSignatures[idx].signature) {
+                const sName = caseSignatures[idx].signerName || (idx === 0 ? buName : idx === 1 ? coName : audName);
+                const sFont = caseSignatures[idx].signatureFont || 'Great Vibes';
+                caseSignatures[idx].signature = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="260" height="70"><text x="15" y="45" font-family="${encodeURIComponent(sFont)}" font-size="28" fill="%230B2C87">${encodeURIComponent(sName)}</text></svg>`;
+              }
+            } else {
+              caseSignatures[idx].status = 'Pending';
+              caseSignatures[idx].signature = '';
+              caseSignatures[idx].signedAt = null;
+              caseSignatures[idx].comments = idx === 0
+                ? 'Awaiting Business User review and acceptance'
+                : idx === 1
+                  ? 'Awaiting Compliance Officer review'
+                  : 'Awaiting audit review';
+            }
+          });
+        }
+
+        const docApprovalStatus = isAuditorSigned
+          ? 'Approved'
+          : (isComplianceApproved ? 'Pending_Compliance_Approval' : (isForwarded ? 'Pending_Compliance_Approval' : 'Pending_Business_Approval'));
+
+        const updateData = {
+          fileSize: fileSize || existingDoc.fileSize || 1024,
+          storageUrl,
+          status: 'Active',
+          approvalStatus: docApprovalStatus,
+          validationStatus: 'Valid',
+          isVerified: true,
+          documentType: docCategory,
+          customerName: resolvedApplicant,
+          customerRef: caseRef,
+          description: `Verified via VerifyChain (${doc.verificationStatus || status || 'VERIFIED'})`,
+          signatures: caseSignatures,
+          approvalWorkflow: workflowStatus
+        };
+        targetDoc = await Document.findByIdAndUpdate(
+          existingDoc._id,
+          { $set: updateData },
+          { new: true, runValidators: false }
+        );
+        syncedDocs.push(targetDoc);
       } else {
+        const docApprovalStatus = isAuditorSigned
+          ? 'Approved'
+          : (isComplianceApproved ? 'Pending_Compliance_Approval' : (isForwarded ? 'Pending_Compliance_Approval' : 'Pending_Business_Approval'));
+
         const newDoc = new Document({
           name: docDisplayName,
           originalFileName: rawOriginalName,
@@ -421,7 +529,7 @@ const processSingleCaseSync = async (req, caseData) => {
           fileSize: fileSize || 1024,
           storageUrl,
           status: 'Active',
-          approvalStatus: 'Approved',
+          approvalStatus: docApprovalStatus,
           validationStatus: 'Valid',
           isVerified: true,
           documentType: docCategory,
